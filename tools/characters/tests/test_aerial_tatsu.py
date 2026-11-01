@@ -5,10 +5,14 @@ Run: python -m unittest discover -s tools/characters/tests -p test_aerial_tatsu.
 """
 import collections
 import copy
+import os
+import sys
 import unittest
 from types import SimpleNamespace
 
-from tools.characters.ttt2char.convert import aerial_tatsu
+# CTest invokes discovery from its build directory, not the repository root.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from ttt2char.convert import aerial_tatsu
 
 
 class T7Source:
