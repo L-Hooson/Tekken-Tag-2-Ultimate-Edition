@@ -106,6 +106,13 @@ target_include_directories(damage_scaling_test PRIVATE ${CMAKE_SOURCE_DIR}/runti
 target_compile_options(damage_scaling_test PRIVATE -Wall -Wextra)
 add_test(NAME damage_scaling_test COMMAND damage_scaling_test)
 
+# Per-fighter hitstop timing (pure scheduler, without Tekken assets).
+add_executable(hitstop_model_test hitstop_model_test.cpp)
+target_include_directories(hitstop_model_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(hitstop_model_test PRIVATE cxx_std_20)
+target_compile_options(hitstop_model_test PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)
+add_test(NAME hitstop_model_test COMMAND hitstop_model_test)
+
 # The keyboard's keys from keyboard.ini and its reloading (files in a
 # scratch folder of the build tree; SDL only for its key names).
 find_package(SDL3 REQUIRED CONFIG)
