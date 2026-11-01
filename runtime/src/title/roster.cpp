@@ -3780,7 +3780,7 @@ void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
             std::fprintf(stderr,
                 "akuma-contact-probe,tick=%llu,move=%.*s,hit=%u,freeze=%u,"
                 "remaining=%u,owner=%08X,victim=%08X,slot=%08X,row=%08X,"
-                "native-gate=not-installed\\n",
+                "native-gate=not-installed\n",
                 static_cast<unsigned long long>(g_akuma_probe.tick),
                 int(move.size()), move.data(), hit.hit, hit.freeze,
                 shot.remaining_after_hit, attacker, victim, slot, row);
