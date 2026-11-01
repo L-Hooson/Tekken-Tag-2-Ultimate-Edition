@@ -36,7 +36,7 @@ from ..ttt2 import animation, motbin, motion
 from . import arcs
 from . import gauge as G
 from . import idmaps as M
-from . import tagsystem, tagcombo, specialcancels, move_overrides, retarget
+from . import tagsystem, tagcombo, specialcancels, move_overrides, retarget, aerial_tatsu
 
 T7_END, TT_END = M.END_REQ['t7'], M.END_REQ['ttt2']
 SEQ0 = 0x800D                       # a cancel direction from here on names an input sequence
@@ -1818,6 +1818,7 @@ class Converter:
             self.T, self.move_name, d.tables, d.move_name)
         move_overrides.apply(self)
         specialcancels.apply(self)
+        aerial_tatsu.apply(self)
         self.dismiss_when_hit()
         self.hold_thrown()
         # TTT2's tag system on the converted moves (convert/tagsystem.py; the slams were gated while linking): the
