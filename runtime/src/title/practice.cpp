@@ -23,6 +23,7 @@
 
 #include "title/framedata.h"
 #include "title/gauge.h"
+#include "title/roster.h"
 
 #include "cafe/input.h"
 #include "cafe/ppc_ops.h"
@@ -564,10 +565,13 @@ PPC_FUNC(sub_03ADB118) {
     const bool in_practice = practice(base);
     g_fighters_ran = true;
     if (in_practice) os::arm_select_chord(three_held(base));
+    const uint32_t before[2] = {active_fighter(base, 0), active_fighter(base, 1)};
+    title::akuma_contact_probe_begin(before);
     sub_03ADB118_orig(ctx, base);
     close_submenu(ctx, base); // (left by closing the pause menu)
     update_texts(base, in_practice);
     const uint32_t fighters[2] = {active_fighter(base, 0), active_fighter(base, 1)};
+    title::akuma_contact_probe_end(fighters);
     title::gauge::fighters_frame(ctx, base, fighters, in_practice);
     if (in_practice) title::framedata::fighters_frame(base, fighters);
 }
