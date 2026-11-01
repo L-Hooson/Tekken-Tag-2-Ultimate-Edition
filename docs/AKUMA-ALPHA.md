@@ -14,6 +14,7 @@ through the project's own importer and runtime without redistributing game data.
 | Hitstop frame scheduler | Yes; pure C++ model | Standalone C++ test built and passed locally |
 | Approved EX/Super impact cadence (pure model) | Yes; `akuma_projectile_timing.h` | C++ test passed locally |
 | T7 contact-stop actions | Converter support gated, disabled in Akuma definition | Python regression tests committed; not yet executed |
+| Read-only native projectile collision probe | Wired into roster/practice under `TTT2_TRACE_AKUMA_CONTACT=1` | Windows runtime verification **pending** |
 | Runtime hitstop adapter | **Not yet ported** | Pending |
 | EX Hadoken: two-hit reaction/knockdown/pushback | **Not yet ported** | Pending |
 | Super Fireball: five-hit per-impact hitstop | **Not yet ported** | Pending |
@@ -46,6 +47,28 @@ through the project's own importer and runtime without redistributing game data.
 - `convert/moveset.py` can preserve raw Tekken 7 action IDs 0x8292/0x8293
   behind `HITSTOP_CONTACT_ACTIONS`, which deliberately remains disabled
   in Akuma's character definition until the runtime adapter exists.
+
+## Phase 82C: tracing a fresh source-built Akuma
+
+The clean branch now brackets the native fighter simulation with
+`akuma_contact_probe_begin/end` and observes accepted projectile damage
+after `sub_03AE1704_orig`. The probe requires all of: a selected Akuma
+owner, the currently active opponent, verified native projectile-hit flags,
+`Ry_EX_hadoh` or `Ry_shinhadouken`, a live native projectile slot, the
+expected hit capacity (2 or 5), and a decremented hit counter. The Super
+probe additionally requires the tested native speed/team mask (120/1).
+
+Set `TTT2_TRACE_AKUMA_CONTACT=1` in the launched game's environment to
+opt into **read-only** `akuma-contact-probe` log lines. No projectile
+speed, team mask, knockdown or reaction row is modified; the probe never
+freezes an animation clock or changes match damage. A final projectile
+contact may be unobservable after native slot retirement; this is a
+**diagnostic**, not final gameplay parity. Fighter changes reset both
+observation sequences.
+
+The standalone contact classifier is covered by `akuma_contact_gate_test`
+(Windows/Linux CMake/CTest). It passed a local C++ compile/run; **the full
+Windows runtime build and live clean-import trace remain unverified**.
 
 ## Tested experimental reference (not committed)
 
@@ -85,8 +108,14 @@ c++ -std=c++20 -Wall -Wextra -Werror -I runtime/src tests/akuma_projectile_timin
 python -m unittest discover -s tools/characters/tests -p 'test_contact_stop_actions.py' -v
 ```
 
-Windows and Linux CMake/CTest include `hitstop_model_test` and
-`akuma_projectile_timing_test`. The new C++ timing test passed locally;
+Windows and Linux CMake/CTest include `hitstop_model_test`,
+`akuma_projectile_timing_test` and `akuma_contact_gate_test`.
+The latest native contact classifier can also run without game assets:
+
+```bash
+c++ -std=c++20 -Wall -Wextra -Werror -I runtime/src tests/akuma_contact_gate_test.cpp -o akuma_contact_gate_test
+./akuma_contact_gate_test
+``` The new C++ timing test passed locally;
 the new Python converter test still awaits execution.
 The full game import, runtime compile, Windows play test, and end-to-end
 feature parity are **not** confirmed.
