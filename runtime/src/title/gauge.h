@@ -43,7 +43,8 @@ bool parse(const std::string& value, Config& config);
 
 // The added fighter `slot` has this gauge; its pictures are its pack's
 // gauge/ (gauge.ini, gauge.nut), if it has them.
-void configure(int slot, const Config& config, const std::filesystem::path& pack);
+void configure(int slot, const Config& config, const std::filesystem::path& pack,
+               const std::string& character_code);
 
 // The moveset's (the added fighter `slot`'s; -1: another fighter's). True
 // when the id is the gauge's (the requirement's result in `result`).
