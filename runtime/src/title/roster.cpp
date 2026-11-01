@@ -3789,7 +3789,7 @@ void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
 }
 } // namespace
 
-void akuma_contact_probe_begin(const uint32_t fighters[2]) {
+void cafe::title::akuma_contact_probe_begin(const uint32_t fighters[2]) {
     if (!akuma_probe_enabled()) return;
     if (!fighters[0] || !fighters[1] ||
         g_akuma_probe.fighters[0] != fighters[0] ||
@@ -3805,7 +3805,7 @@ void akuma_contact_probe_begin(const uint32_t fighters[2]) {
     g_akuma_probe.ex.release_due(g_akuma_probe.tick);
     g_akuma_probe.super.release_due(g_akuma_probe.tick);
 }
-void akuma_contact_probe_end(const uint32_t fighters[2]) {
+void cafe::title::akuma_contact_probe_end(const uint32_t fighters[2]) {
     if (!akuma_probe_enabled()) return;
     if (fighters[0] == g_akuma_probe.fighters[0] &&
         fighters[1] == g_akuma_probe.fighters[1]) return;
