@@ -16,7 +16,8 @@ through the project's own importer and runtime without redistributing game data.
 | T7 contact-stop actions | Converter support gated, disabled in Akuma definition | Python regression tests committed; not yet executed |
 | Read-only native projectile collision probe | Wired into roster/practice under `TTT2_TRACE_AKUMA_CONTACT=1` | Windows runtime verification **pending** |
 | Runtime hitstop adapter | **Not yet ported** | Pending |
-| EX Hadoken: two-hit reaction/knockdown/pushback | **Not yet ported** | Pending |
+| EX Hadoken second-hit reaction overlay | Verified reversible four-ID component; **not wired to live runtime** | Standalone C++ test passed locally |
+| EX Hadoken: complete two-hit reaction/knockdown/pushback | **Not yet ported** | Pending |
 | Super Fireball: five-hit per-impact hitstop | **Not yet ported** | Pending |
 | Source-physics Demon Flip/follow-up conversions | **Not yet ported** | Pending |
 | Normal-to-special cancellation parity | Requires further review | Pending |
@@ -47,6 +48,24 @@ through the project's own importer and runtime without redistributing game data.
 - `convert/moveset.py` can preserve raw Tekken 7 action IDs 0x8292/0x8293
   behind `HITSTOP_CONTACT_ACTIONS`, which deliberately remains disabled
   in Akuma's character definition until the runtime adapter exists.
+
+## Phase 82D: corrections and EX reaction overlay
+
+- Correct the collision probe function definitions to use `cafe::title`,
+  matching `roster.h` and their callers in `practice.cpp`.
+- Identify the optional Practice meter-refill recipient by the pack's
+  actual `code` (`mrx`), not the installation folder's filename.
+- Correct aerial-Tatsu Python test imports for CTest's build-directory
+  working directory.
+- Isolate the Phase 80E second-hit EX Hadoken reaction substitution in
+  `akuma_ex_reaction.h`. All four stagger IDs (2504–2507) must match
+  before changing them to knockdown IDs (2532–2535). Restoration
+  refuses unknown external writers and can recover a failed partial write.
+  `akuma_ex_reaction_test` compiled and passed locally.
+
+**This transaction is not connected to guest memory** in the clean branch.
+The EX pushback pointer transfer, live projectile gate, hitstop event adapter
+and full Windows import still require testing.
 
 ## Phase 82C: tracing a fresh source-built Akuma
 
@@ -109,14 +128,22 @@ python -m unittest discover -s tools/characters/tests -p 'test_contact_stop_acti
 ```
 
 Windows and Linux CMake/CTest include `hitstop_model_test`,
-`akuma_projectile_timing_test` and `akuma_contact_gate_test`.
+`akuma_projectile_timing_test`, `akuma_contact_gate_test` and
+`akuma_ex_reaction_test`.
 The latest native contact classifier can also run without game assets:
 
 ```bash
 c++ -std=c++20 -Wall -Wextra -Werror -I runtime/src tests/akuma_contact_gate_test.cpp -o akuma_contact_gate_test
 ./akuma_contact_gate_test
-``` The new C++ timing test passed locally;
-the new Python converter test still awaits execution.
+```
+
+The new C++ timing tests passed locally; Python converter CI validation
+remains outstanding. The four-field EX reaction test is also available:
+
+```bash
+c++ -std=c++20 -Wall -Wextra -Werror -I runtime/src tests/akuma_ex_reaction_test.cpp -o akuma_ex_reaction_test
+./akuma_ex_reaction_test
+```
 The full game import, runtime compile, Windows play test, and end-to-end
 feature parity are **not** confirmed.
 
