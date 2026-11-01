@@ -24,6 +24,8 @@ class ContactActionConversion(unittest.TestCase):
         c.stats = collections.Counter()
         c.k_id = 32
         c.newid = 50
+        c.gauge = None
+        c.map_req = lambda _condition: None  # unsupported action when not opted in
         c.T = {'requirements': []}
         source = [
             dict(condition=0x8292, param=0x00061400),
