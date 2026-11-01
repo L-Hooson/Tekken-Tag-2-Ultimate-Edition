@@ -10,7 +10,7 @@ TEKKEN7_ID = 32
 TEKKEN7_CODE = 'mrx'
 CODE = 'mrx'
 SEX = 'male'
-REVISION = 2                  # his gauge (1: packs made before have his EX moves free); its full sound (2)
+REVISION = 3                  # 3: restore T7 normal/EX aerial Tatsumaki routes
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
 PRESETS = (
@@ -88,6 +88,8 @@ GAUGE = dict(max=1000, stock=500, gain=(37, 75, 112, 225), hud='/Game/UI_Common/
              full_sound='SE_battle_spgauge_full')
 
 MOVESET = {
+    # Reconstruct airborne normal and EX Tatsu routes from each user's own T7 moveset.
+    'aerial_tatsu_jumps': True,
     # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds, and d/f+1+2 (Mx_3lrp)
     'bounds': dict.fromkeys(('Mx_3lprp2', 'Mx_66rk', 'Mx_6lrp', 'Mx_6lrp2', 'Mx_hyaki_gouB', 'Mx_kkt2',
                              'Mx_3lrp'), True),
