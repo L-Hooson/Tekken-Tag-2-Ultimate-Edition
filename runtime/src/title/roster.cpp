@@ -1446,7 +1446,7 @@ void prepare_roster() {
         }
         added.code_string = guest_string(pack.code);
         added.active = true;
-        if (pack.gauge) gauge::configure(static_cast<int>(k), *pack.gauge, pack.directory);
+        if (pack.gauge) gauge::configure(static_cast<int>(k), *pack.gauge, pack.directory, pack.code);
         if (const auto place = cell_of(k)) {
             added.cell = kFirstAddedCell + static_cast<uint32_t>(k);
             added.column = place->column;
