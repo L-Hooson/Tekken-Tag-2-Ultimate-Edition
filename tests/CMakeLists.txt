@@ -120,6 +120,13 @@ target_compile_features(akuma_projectile_timing_test PRIVATE cxx_std_20)
 target_compile_options(akuma_projectile_timing_test PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)
 add_test(NAME akuma_projectile_timing_test COMMAND akuma_projectile_timing_test)
 
+# Akuma native projectile contact classification (read-only, no game files).
+add_executable(akuma_contact_gate_test akuma_contact_gate_test.cpp)
+target_include_directories(akuma_contact_gate_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(akuma_contact_gate_test PRIVATE cxx_std_20)
+target_compile_options(akuma_contact_gate_test PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)
+add_test(NAME akuma_contact_gate_test COMMAND akuma_contact_gate_test)
+
 # The keyboard's keys from keyboard.ini and its reloading (files in a
 # scratch folder of the build tree; SDL only for its key names).
 find_package(SDL3 REQUIRED CONFIG)
