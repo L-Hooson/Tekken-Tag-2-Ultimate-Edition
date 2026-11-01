@@ -12,6 +12,8 @@ through the project's own importer and runtime without redistributing game data.
 | Aerial Tatsu synthetic regression tests | Yes | Four locally exercised with supporting converter modules |
 | Practice-only Akuma neutral gauge refill | Yes; environment-gated | **Pending** |
 | Hitstop frame scheduler | Yes; pure C++ model | Standalone C++ test built and passed locally |
+| Approved EX/Super impact cadence (pure model) | Yes; `akuma_projectile_timing.h` | C++ test passed locally |
+| T7 contact-stop actions | Converter support gated, disabled in Akuma definition | Python regression tests committed; not yet executed |
 | Runtime hitstop adapter | **Not yet ported** | Pending |
 | EX Hadoken: two-hit reaction/knockdown/pushback | **Not yet ported** | Pending |
 | Super Fireball: five-hit per-impact hitstop | **Not yet ported** | Pending |
@@ -37,6 +39,13 @@ through the project's own importer and runtime without redistributing game data.
   with explicit fighter lifecycle and bounded frame scheduling. It is
   **not yet connected** to the runtime's contact callback. The imported
   per-move actions must also be preserved before hitstop can function.
+- `runtime/src/title/akuma_projectile_timing.h` preserves the approved
+  EX Hadoken 8/5-frame stops at nine-tick spacing and Super Fireball
+  6/6/6/6/5-frame stops at seven-tick spacing, without writing guest memory.
+  Its source-only C++ test passed locally; it is not wired to damage callbacks.
+- `convert/moveset.py` can preserve raw Tekken 7 action IDs 0x8292/0x8293
+  behind `HITSTOP_CONTACT_ACTIONS`, which deliberately remains disabled
+  in Akuma's character definition until the runtime adapter exists.
 
 ## Tested experimental reference (not committed)
 
@@ -68,7 +77,17 @@ c++ -std=c++20 -Wall -Wextra -Werror -I runtime/src tests/hitstop_model_test.cpp
 ./hitstop_model_test
 ```
 
-Windows and Linux CMake/CTest targets are included as `hitstop_model_test`.
+Source-only projectile timing and converter opt-in tests are also added:
+
+```bash
+c++ -std=c++20 -Wall -Wextra -Werror -I runtime/src tests/akuma_projectile_timing_test.cpp -o akuma_projectile_timing_test
+./akuma_projectile_timing_test
+python -m unittest discover -s tools/characters/tests -p 'test_contact_stop_actions.py' -v
+```
+
+Windows and Linux CMake/CTest include `hitstop_model_test` and
+`akuma_projectile_timing_test`. The new C++ timing test passed locally;
+the new Python converter test still awaits execution.
 The full game import, runtime compile, Windows play test, and end-to-end
 feature parity are **not** confirmed.
 
