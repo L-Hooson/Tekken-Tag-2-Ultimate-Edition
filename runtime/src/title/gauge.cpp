@@ -298,6 +298,7 @@ struct Player {
 std::map<uint32_t, Player> g_players; // by fighter
 
 struct Fighter {
+    bool is_akuma = false; // set from the character pack's code; only used by the optional Practice refill
     Config config;
     std::optional<Hud> hud;
 };
@@ -674,6 +675,7 @@ bool parse(const std::string& value, Config& config) {
 void configure(int slot, const Config& config, const fs::path& pack) {
     Fighter& f = g_fighters[slot];
     f.config = config;
+    f.is_akuma = pack.filename().string() == "mrx";
     f.hud = read_hud(pack / "gauge");
     if (!f.hud) std::fprintf(stderr, "ttt2: %s has a gauge but no gauge/ pictures; it is not shown\n",
                              pack.filename().string().c_str());
@@ -815,6 +817,33 @@ void fighters_frame(PPCContext& ctx, uint8_t* base, const uint32_t fighters[2], 
         if (!who[s] || !gains[s]) continue;
         Player& p = player(fighters[s], slots[s]);
         p.value = clamp(p.value + gains[s], who[s]->config.max);
+    }
+    // Optional Practice-only Akuma meter refill for testing special moves.
+    // Kept disabled unless explicitly requested; it never runs during real
+    // matches, movement, attacks, hitstun or a cinematic.
+    if (practice && fighters[0] && fighters[1]) {
+        const char* flag = std::getenv("TTT2_TEST_AKUMA_NEUTRAL_METER");
+        if (flag && std::strcmp(flag, "1") == 0) {
+            const auto standing_idle = [&](uint32_t address) -> bool {
+                if (ppc::ld32(base, address + kPhase) != 2) return false;
+                const uint32_t move = ppc::ld32(base, address + kMove);
+                if (!move) return false;
+                const uint32_t name = ppc::ld32(base, move);
+                if (!name) return false;
+                const char* n = reinterpret_cast<const char*>(base + name);
+                // Observed neutral stance naming: Mx_sKAM00_, Bv_sKAM00_.
+                return n[0] && n[1] && n[2] == '_' &&
+                       std::strncmp(n + 3, "sKAM00_", 7) == 0;
+            };
+            if (standing_idle(fighters[0]) && standing_idle(fighters[1])) {
+                for (int side = 0; side < 2; ++side) {
+                    if (!who[side] || !who[side]->is_akuma) continue;
+                    Player& p = player(fighters[side], slots[side]);
+                    if (p.value >= who[side]->config.max) continue;
+                    p.value = who[side]->config.max;
+                }
+            }
+        }
     }
     // The full sound: as a gauge reaches its most from below (this frame's
     // costs, adds and gains done), as Tekken 7's gauge-full event plays it.
