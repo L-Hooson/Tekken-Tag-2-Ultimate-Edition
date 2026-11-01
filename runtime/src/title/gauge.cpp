@@ -672,10 +672,11 @@ bool parse(const std::string& value, Config& config) {
     return true;
 }
 
-void configure(int slot, const Config& config, const fs::path& pack) {
+void configure(int slot, const Config& config, const fs::path& pack,
+               const std::string& character_code) {
     Fighter& f = g_fighters[slot];
     f.config = config;
-    f.is_akuma = pack.filename().string() == "mrx";
+    f.is_akuma = character_code == "mrx";
     f.hud = read_hud(pack / "gauge");
     if (!f.hud) std::fprintf(stderr, "ttt2: %s has a gauge but no gauge/ pictures; it is not shown\n",
                              pack.filename().string().c_str());
