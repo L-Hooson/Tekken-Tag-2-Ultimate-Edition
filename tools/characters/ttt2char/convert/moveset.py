@@ -900,6 +900,14 @@ class Converter:
                 self.stats['Tekken 8-only requirements -> false: ' + what] += 1
                 res = (None, False)
                 break
+            if g == 't7' and c in (0x8292, 0x8293) and getattr(self.defn, 'HITSTOP_CONTACT_ACTIONS', False):
+                # Retain T7's original conditional hitstop action and raw timer
+                # word. This opt-in MUST remain disabled until the native
+                # roster.cpp event adapter is installed and tested: unsupported
+                # action IDs must not be sent to ordinary TTT2 characters.
+                rows.append({'condition': c, 'param': self.req_value(row) & 0xFFFFFFFF})
+                self.stats['contact-stop actions retained'] += 1
+                continue
             c2 = overrides[c] if overrides and c in overrides else self.map_req(c)
             if c >= 0x8000 and c not in (self.end, MOVE_PARAM[g]) and c not in REQ_PROP_KEEP[g]:
                 v = self.req_value(row)           # (a Tekken 8 sound: its split value, req_value)
