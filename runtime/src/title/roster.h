@@ -31,4 +31,10 @@ void prepare_roster();
 // struct) is, or -1.
 int added_slot(uint32_t player);
 
+// Diagnostic Phase 82C: track native EX/Super projectile contacts without
+// modifying reaction tables, guest projectile memory or animation clocks.
+// Disabled unless TTT2_TRACE_AKUMA_CONTACT=1 is set when the game starts.
+void akuma_contact_probe_begin(const uint32_t fighters[2]);
+void akuma_contact_probe_end(const uint32_t fighters[2]);
+
 } // namespace cafe::title
