@@ -5,6 +5,8 @@
 #include "title/noctis_hitbox.h"
 #include "title/damage_scaling.h"
 #include "title/gauge.h"
+#include "title/akuma_contact_gate.h"
+#include "title/akuma_projectile_timing.h"
 #include "outfit_menu.h"
 
 #include "cafe/ppc_ops.h"
@@ -3726,6 +3728,93 @@ void trace_noctis_air_step(uint32_t player) {
 }
 }
 
+// Phase 82C: read-only contact observation. Never patch native projectile
+// rows or reaction tables here; the reversible gate is a later milestone.
+namespace {
+struct AkumaContactProbe {
+    uint32_t fighters[2]{};
+    uint64_t tick = 0;
+    akuma_projectile::Sequence ex{akuma_projectile::Kind::ex_hadoken};
+    akuma_projectile::Sequence super{akuma_projectile::Kind::shinku_hadoken};
+} g_akuma_probe;
+
+bool akuma_probe_enabled() {
+    static const bool enabled = [] {
+        const char* s = std::getenv("TTT2_TRACE_AKUMA_CONTACT");
+        return s && std::strcmp(s, "1") == 0;
+    }();
+    return enabled;
+}
+void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
+    if (!akuma_probe_enabled() || !g_akuma_probe.tick || !attacker || !victim || !result) return;
+    const bool same_pair =
+        (attacker == g_akuma_probe.fighters[0] && victim == g_akuma_probe.fighters[1]) ||
+        (attacker == g_akuma_probe.fighters[1] && victim == g_akuma_probe.fighters[0]);
+    if (!same_pair || load(attacker + 0x98u) != victim) return;
+    const int added = added_slot(attacker);
+    if (added < 0 || g_added[added].code != "mrx") return;
+    const std::string_view move = damage_move_name(attacker);
+    const uint32_t capacity = move == "Ry_EX_hadoh" ? 2u :
+                              move == "Ry_shinhadouken" ? 5u : 0u;
+    if (!capacity) return;
+    const uint32_t flags = load(result + 0x3cu);
+    if (load(result + 0x40u) != 3u ||
+        !(flags & 0x02000000u) || (flags & 0x80000000u)) return;
+    for (uint32_t i = 0; i < 24u; ++i) {
+        const uint32_t slot = attacker + 7968u + i * 96u;
+        const uint32_t row = load(slot + 60u);
+        if (row < 0x30000000u || row >= 0x40000000u ||
+            load(slot + 32u) == 0xFFFFFFFFu) continue;
+        akuma_contact::Snapshot shot{
+            true, true, true, move, 3u, flags, load(row + 16u),
+            load(slot + 40u), load(slot + 44u),
+            load(row + 8u), load(row + 88u)
+        };
+        const auto kind = akuma_contact::classify(shot);
+        if (kind == akuma_contact::Kind::none) continue;
+        auto& seq = kind == akuma_contact::Kind::ex_hadoken
+            ? g_akuma_probe.ex : g_akuma_probe.super;
+        const auto hit = seq.accept({g_akuma_probe.tick, attacker, victim,
+                                    slot, row, shot.remaining_after_hit});
+        if (hit.accepted)
+            std::fprintf(stderr,
+                "akuma-contact-probe,tick=%llu,move=%.*s,hit=%u,freeze=%u,"
+                "remaining=%u,owner=%08X,victim=%08X,slot=%08X,row=%08X,"
+                "native-gate=not-installed\\n",
+                static_cast<unsigned long long>(g_akuma_probe.tick),
+                int(move.size()), move.data(), hit.hit, hit.freeze,
+                shot.remaining_after_hit, attacker, victim, slot, row);
+        break;
+    }
+}
+} // namespace
+
+void akuma_contact_probe_begin(const uint32_t fighters[2]) {
+    if (!akuma_probe_enabled()) return;
+    if (!fighters[0] || !fighters[1] ||
+        g_akuma_probe.fighters[0] != fighters[0] ||
+        g_akuma_probe.fighters[1] != fighters[1]) {
+        g_akuma_probe.ex.reset();
+        g_akuma_probe.super.reset();
+        g_akuma_probe.tick = 0;
+    }
+    g_akuma_probe.fighters[0] = fighters[0];
+    g_akuma_probe.fighters[1] = fighters[1];
+    if (!fighters[0] || !fighters[1]) return;
+    ++g_akuma_probe.tick;
+    g_akuma_probe.ex.release_due(g_akuma_probe.tick);
+    g_akuma_probe.super.release_due(g_akuma_probe.tick);
+}
+void akuma_contact_probe_end(const uint32_t fighters[2]) {
+    if (!akuma_probe_enabled()) return;
+    if (fighters[0] == g_akuma_probe.fighters[0] &&
+        fighters[1] == g_akuma_probe.fighters[1]) return;
+    g_akuma_probe.ex.reset();
+    g_akuma_probe.super.reset();
+    g_akuma_probe.tick = 0;
+    g_akuma_probe.fighters[0] = g_akuma_probe.fighters[1] = 0;
+}
+
 // Geese has a character-specific grounded combo curve in T7's executable,
 // rather than in its MVLT/move damage rows. TTT2 has no corresponding fighter.
 // Keep its native hit accounting/reset logic, then scale this hit's output
@@ -3767,6 +3856,7 @@ PPC_FUNC(sub_03AE1704) { // defender r3, attacker r4, damage result r5
     std::array<int32_t, 4> before;
     for (size_t i = 0; i < before.size(); ++i) before[i] = static_cast<int32_t>(load(result + 0x2c + 4 * i));
     sub_03AE1704_orig(ctx, base);
+    akuma_probe_observe(attacker, defender, result); // read only, after native damage dispatch
     // Narrow diagnostic for the optional native Armor King wall-throw graft.
     const auto ak_attacker_move = damage_move_name(attacker);
     const auto ak_defender_move = damage_move_name(defender);
