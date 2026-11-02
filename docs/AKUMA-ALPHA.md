@@ -17,8 +17,8 @@ through the project's own importer and runtime without redistributing game data.
 | Read-only native projectile collision probe | Wired into roster/practice under `TTT2_TRACE_AKUMA_CONTACT=1` | Windows runtime verification **pending** |
 | Runtime hitstop adapter | Experimental Shinku and EX opt-ins | **Fresh build/game test pending** |
 | Reversible Shinku native inter-hit gate | Opt-in only; implemented and wired | **Fresh Windows build/game test pending** |
-| EX Hadoken second-hit reaction overlay | Verified reversible four-ID component; **not wired to live runtime** | Standalone C++ test passed locally |
-| EX Hadoken: two-hit nine-tick gate / 8+5f stop | Optional runtime implementation; knockdown/pushback still missing | **Fresh build/game test pending** |
+| EX Hadoken second-hit reaction overlay | Guarded and connected behind **two** default-off test flags | Fresh Windows/gameplay verification pending |
+| EX Hadoken: two-hit nine-tick gate / 8+5f stop | Source importer reconstructs two contacts; runtime stage-two knockdown and pushback are opt-in | **Fresh build/game test pending** |
 | Super Fireball: five-hit per-impact hitstop | Experimental 6/6/6/6/5 runtime path | **Fresh build/game test pending** |
 | Source-physics Demon Flip/follow-up conversions | **Not yet ported** | Pending |
 | Normal-to-special cancellation parity | Requires further review | Pending |
@@ -60,7 +60,7 @@ through the project's own importer and runtime without redistributing game data.
   states. It keeps the converted move's animations, damage, hit and landing
   properties from the player's own Tekken 7 data.
 - `tools/characters/ttt2char/characters/akuma.py` opts into those routes.
-  Revision **5** deliberately avoids conflicts with experimental revisions
+  Revision **6** includes two-contact EX conversion and avoids conflicts with experimental revisions
   3 (Demon Flip source physics) and 4 (contact-stop actions). **Revision
   number alone does not mean those experimental features are integrated.**
 - `runtime/src/title/gauge.cpp` includes an optional Practice testing aid:
