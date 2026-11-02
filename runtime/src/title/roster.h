@@ -31,9 +31,12 @@ void prepare_roster();
 // struct) is, or -1.
 int added_slot(uint32_t player);
 
-// Diagnostic Phase 82C: track native EX/Super projectile contacts without
-// modifying reaction tables, guest projectile memory or animation clocks.
-// Disabled unless TTT2_TRACE_AKUMA_CONTACT=1 is set when the game starts.
+// Native Akuma EX/Super contact probe (Phase 82C).
+// With TTT2_TRACE_AKUMA_CONTACT=1, this remains read-only.
+// An additional experimental TTT2_TEST_AKUMA_SUPER_GATE=1 opt-in enables
+// a reversible seven-tick native Shinku projectile gate. Neither flag is
+// enabled by default. EX Hadoken remains read-only here; actual hitstop
+// and EX reaction restoration are not yet wired into this source branch.
 void akuma_contact_probe_begin(const uint32_t fighters[2]);
 void akuma_contact_probe_end(const uint32_t fighters[2]);
 
