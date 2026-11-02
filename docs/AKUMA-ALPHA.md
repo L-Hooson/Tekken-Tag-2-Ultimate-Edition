@@ -152,6 +152,16 @@ Phase 82A installation with this source branch yet.
 - The selected original T7 contact actions remain **disabled** for Akuma until
   a separate verified native property adapter is ready. Do not enable
   `HITSTOP_CONTACT_ACTIONS` merely to enable the EX/Super collision pilot.
+- `runtime/src/title/akuma_ex_pushback.h` is a **standalone**, reversible
+  seven-pointer pushback overlay extracted from the accepted Phase 80E09
+  experiment. It validates the expected source reaction 2516–2519, native
+  stage-two layout (five 0x50-byte reaction records earlier), and pushback
+  values (front 48/30, downed 32/50 with value 8). The guest accessor is
+  injected, so tests use synthetic memory and no game files. Its local
+  C++ test passed on apply, restore, third-party conflict and partial-write
+  recovery; Windows and Linux CMake/CTest and source CI include the test.
+  **This is not connected to live runtime memory**. Stage-two knockdown and
+  pushback in a fresh game build remain unverified.
 - `.github/workflows/akuma-source-checks.yml` adds source-only GitHub checks
   for aerial Tatsu, conversion opt-ins, EX reaction overlay, the two projectile
   timing models, and hitstop scheduling. They require no redistributed game
