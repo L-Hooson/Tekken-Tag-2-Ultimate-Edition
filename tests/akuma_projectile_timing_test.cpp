@@ -14,6 +14,10 @@ int main() {
     a = ex.accept({19, 1, 2, 3, 4, 0});
     assert(a.accepted && a.finished && !a.gate_next && a.freeze == 5);
     assert(!ex.accept({20, 1, 2, 3, 4, 0}).accepted);
+    // A different EX Hadoken in the same round may reuse the same native slot.
+    assert(!ex.accept({27, 1, 2, 3, 4, 0}).accepted);
+    auto next_ex = ex.accept({28, 1, 2, 3, 4, 1});
+    assert(next_ex.accepted && next_ex.hit == 1 && next_ex.freeze == 8);
     ex.reset();
     assert(!ex.accept({0, 1, 2, 3, 4, 0}).accepted);
     assert(!ex.active());
@@ -40,4 +44,9 @@ int main() {
     assert(wrong.release_due(27));
     assert(!wrong.accept({28, 1, 2, 3, 4, 0}).accepted);
     assert(!wrong.active());
+    // No fighter swap should be needed before firing the next Super.
+    assert(!super.accept({129, 1, 2, 3, 4, 4}).accepted);
+    const auto repeat_super = super.accept({135, 1, 2, 3, 4, 4});
+    assert(repeat_super.accepted && repeat_super.hit == 1 &&
+           repeat_super.freeze == 6 && repeat_super.gate_next);
 }
