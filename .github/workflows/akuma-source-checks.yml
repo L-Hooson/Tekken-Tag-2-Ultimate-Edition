@@ -1,0 +1,47 @@
+name: Akuma source-only regression checks
+
+on:
+  push:
+    branches:
+      - feature/akuma-v0.1.0-alpha
+  pull_request:
+    paths:
+      - 'runtime/src/title/akuma_*.h'
+      - 'runtime/src/title/hitstop_model.h'
+      - 'runtime/src/title/roster.cpp'
+      - 'tools/characters/ttt2char/**'
+      - 'tools/characters/tests/test_aerial_tatsu.py'
+      - 'tests/akuma_*_test.cpp'
+      - 'tests/hitstop_model_test.cpp'
+      - '.github/workflows/akuma-source-checks.yml'
+  workflow_dispatch:
+
+jobs:
+  source-only-regressions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install importer test dependencies
+        run: python -m pip install --disable-pip-version-check numpy pillow
+      - name: Verify aerial Tatsumaki source conversion
+        run: python -m unittest discover -s tools/characters/tests -p test_aerial_tatsu.py -v
+      - name: Compile and execute gameplay scheduling tests without game assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/akuma-source-checks
+          for name in \
+            akuma_contact_gate_test \
+            akuma_projectile_timing_test \
+            akuma_reversible_gate_test \
+            hitstop_model_test; do
+            c++ -std=c++20 -O2 -Wall -Wextra -Werror -UNDEBUG -I runtime/src "tests/${name}.cpp" -o "/tmp/akuma-source-checks/${name}"
+            "/tmp/akuma-source-checks/${name}"
+          done
+      - name: Check whitespace in tracked changes
+        run: git diff --check HEAD~1 HEAD
