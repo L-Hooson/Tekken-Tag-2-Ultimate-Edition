@@ -30,6 +30,8 @@ jobs:
         run: python -m pip install --disable-pip-version-check numpy pillow
       - name: Verify aerial Tatsumaki source conversion
         run: python -m unittest discover -s tools/characters/tests -p test_aerial_tatsu.py -v
+      - name: Verify contact action conversion remains opt-in
+        run: python -m unittest discover -s tools/characters/tests -p test_contact_stop_actions.py -v
       - name: Compile and execute gameplay scheduling tests without game assets
         shell: bash
         run: |
@@ -37,6 +39,7 @@ jobs:
           mkdir -p /tmp/akuma-source-checks
           for name in \
             akuma_contact_gate_test \
+            akuma_ex_reaction_test \
             akuma_projectile_timing_test \
             akuma_reversible_gate_test \
             hitstop_model_test; do
