@@ -34,6 +34,8 @@ jobs:
         run: python -m unittest discover -s tools/characters/tests -p test_aerial_tatsu.py -v
       - name: Verify EX Hadoken two-contact source reconstruction
         run: python -m unittest discover -s tools/characters/tests -p test_akuma_projectiles.py -v
+      - name: Test generated-pack acceptance verifier (synthetic data)
+        run: python -m unittest discover -s tools/characters/tests -p test_akuma_pack_validator.py -v
       - name: Validate importer source modules
         run: python -m compileall -q tools/characters/ttt2char/convert tools/characters/ttt2char/characters/akuma.py
       - name: Verify contact action conversion remains opt-in
