@@ -46,6 +46,15 @@ public:
     Decision accept(Contact c) {
         if (!c.owner || !c.victim || !c.slot || !c.row || c.owner == c.victim)
             return {};
+        // A completed sequence must allow the next projectile's first hit.
+        // Same physical slot and row may be reused by native TTT2. Only
+        // re-arm on a fresh native full-capacity first-hit counter, beyond
+        // the completed sequence's contact window (never on a duplicate).
+        if (state_.active && state_.accepted == policy_.hits && !state_.gate &&
+            c.tick > state_.last_tick &&
+            c.tick - state_.last_tick >= policy_.interval &&
+            c.remaining_after_native == policy_.hits - 1)
+            reset();
         if (!state_.active) {
             if (c.remaining_after_native != policy_.hits - 1) return {};
             state_.active = true;
