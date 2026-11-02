@@ -8,6 +8,8 @@
 #include "title/akuma_contact_gate.h"
 #include "title/akuma_projectile_timing.h"
 #include "title/akuma_reversible_gate.h"
+#include "title/akuma_ex_reaction.h"
+#include "title/akuma_ex_pushback.h"
 #include "title/hitstop_model.h"
 #include "outfit_menu.h"
 
@@ -3741,6 +3743,13 @@ struct AkumaContactProbe {
     akuma_projectile::Sequence super{akuma_projectile::Kind::shinku_hadoken};
     akuma_projectile::ReversibleGate super_gate;
     akuma_projectile::ReversibleGate ex_gate;
+    // Stagger -> knockdown row and T7 second-impact pushback; independent
+    // from the already working native nine-tick projectile separation gate.
+    akuma_ex_reaction::Overlay ex_reaction;
+    akuma_ex_pushback::Overlay ex_pushback;
+    uint32_t ex_reaction_owner = 0, ex_reaction_victim = 0, ex_reaction_row = 0;
+    uint64_t ex_first_tick = 0;
+    bool ex_second_seen = false;
     hitstop::Model super_stop; // shared per-impact stop; independent of cinematic gauge stop
     uint32_t super_owner = 0, ex_owner = 0;
 } g_akuma_probe;
@@ -3760,6 +3769,15 @@ bool akuma_ex_runtime_enabled() {
         return s && std::strcmp(s, "1") == 0;
     }();
     return enabled;
+}
+bool akuma_ex_stage2_enabled() {
+    // Kept separately opt-in until a clean Windows build and collision trace
+    // verify the Phase 80E first-stagger / second-knockdown handshake.
+    static const bool enabled = [] {
+        const char* s = std::getenv("TTT2_TEST_AKUMA_EX_STAGE2");
+        return s && std::strcmp(s, "1") == 0;
+    }();
+    return enabled && akuma_ex_runtime_enabled();
 }
 bool akuma_contact_runtime_enabled() {
     return akuma_super_runtime_enabled() || akuma_ex_runtime_enabled();
@@ -3812,6 +3830,78 @@ void akuma_ex_gate_release(const char* reason) {
     std::fprintf(stderr, "akuma-ex-gate,action=release,reason=%s,restored=%u\n",
                  reason, restored ? 1u : 0u);
 }
+void akuma_ex_stage2_restore(const char* reason) {
+    const auto read32 = [](uint32_t address) { return load(address); };
+    const auto read16 = [](uint32_t address) { return load16(address); };
+    const auto write32 = [](uint32_t address, uint32_t v) { store(address, v); };
+    const auto write16 = [](uint32_t address, uint16_t v) { store16(address, v); };
+    const auto push = g_akuma_probe.ex_pushback.restore(read32, write32);
+    const auto react = g_akuma_probe.ex_reaction.restore(read16, write16);
+    const bool conflict =
+        push == akuma_ex_pushback::Restore::conflict ||
+        react == akuma_ex_reaction::Restore::conflict;
+    if (std::getenv("TTT2_TRACE_AKUMA_CONTACT") || conflict)
+        std::fprintf(stderr,
+            "akuma-ex-stage2,action=restore,reason=%s,push=%u,reaction=%u,conflict=%u\n",
+            reason, static_cast<unsigned>(push), static_cast<unsigned>(react),
+            conflict ? 1u : 0u);
+    // A conflicting overlay retains its original row lease and refuses any
+    // subsequent re-arm, rather than writing into possibly recycled memory.
+    g_akuma_probe.ex_reaction_owner = 0;
+    g_akuma_probe.ex_reaction_victim = 0;
+    g_akuma_probe.ex_reaction_row = 0;
+    g_akuma_probe.ex_first_tick = 0;
+    g_akuma_probe.ex_second_seen = false;
+}
+void akuma_ex_stage2_begin_frame() {
+    if (!g_akuma_probe.ex_reaction_owner) return;
+    const uint64_t tick = g_akuma_probe.tick;
+    const uint64_t start = g_akuma_probe.ex_first_tick;
+    const uint32_t victim = g_akuma_probe.ex_reaction_victim;
+    const bool valid_pair =
+        (g_akuma_probe.fighters[0] == g_akuma_probe.ex_reaction_owner &&
+         g_akuma_probe.fighters[1] == victim) ||
+        (g_akuma_probe.fighters[1] == g_akuma_probe.ex_reaction_owner &&
+         g_akuma_probe.fighters[0] == victim);
+    if (!valid_pair || !akuma_ex_stage2_enabled() || tick < start || tick > start + 15u) {
+        akuma_ex_stage2_restore("context-or-expired");
+        return;
+    }
+    const std::string_view current = damage_move_name(victim);
+    const bool first_stagger = current == "sDm_EXhadoh27" ||
+        current == "sDm_EXhadohL27" || current == "sDm_EXhadohR27" ||
+        current == "sDm_EXhadohB27";
+    const bool final_knockdown = current == "sDm_EXhadouken" ||
+        current == "sDm_EXhadoukenL" || current == "sDm_EXhadoukenR" ||
+        current == "sDm_EXhadoukenB";
+    if (g_akuma_probe.ex_second_seen) {
+        if (final_knockdown || tick >= start + 15u)
+            akuma_ex_stage2_restore(final_knockdown ? "native-knockdown-committed" : "bounded-end");
+        return;
+    }
+    // Never install the stage-two data before Tekken has selected the actual
+    // first standing reaction. The first hit itself stays unchanged.
+    if (tick == start + 1u && first_stagger) {
+        const uint32_t r = g_akuma_probe.ex_reaction_row;
+        const auto read16 = [](uint32_t a) { return load16(a); };
+        const auto write16 = [](uint32_t a, uint16_t v) { store16(a, v); };
+        const auto read32 = [](uint32_t a) { return load(a); };
+        const auto write32 = [](uint32_t a, uint32_t v) { store(a, v); };
+        if (!g_akuma_probe.ex_reaction.apply(r, read16, write16)) {
+            akuma_ex_stage2_restore("reaction-pattern-mismatch");
+            return;
+        }
+        if (!g_akuma_probe.ex_pushback.apply(r, read32, read16, write32)) {
+            akuma_ex_stage2_restore("pushback-pattern-mismatch");
+            return;
+        }
+        std::fprintf(stderr,
+            "akuma-ex-stage2,action=armed,tick=%llu,reaction=%08X,first_stagger=1\n",
+            static_cast<unsigned long long>(tick), r);
+    } else if (tick >= start + 2u && !g_akuma_probe.ex_reaction.active()) {
+        akuma_ex_stage2_restore("first-stagger-not-selected");
+    }
+}
 void akuma_ex_gate_hold(uint32_t player) {
     if (!akuma_ex_runtime_enabled() || !player || player != g_akuma_probe.ex_owner)
         return;
@@ -3859,6 +3949,37 @@ void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
             ? g_akuma_probe.ex : g_akuma_probe.super;
         const auto hit = seq.accept({g_akuma_probe.tick, attacker, victim,
                                     slot, row, shot.remaining_after_hit});
+        // Phase 80E: only record an EX stage-two row after the native first
+        // contact has been accepted and the gated projectile layout checked.
+        if (hit.accepted && kind == akuma_contact::Kind::ex_hadoken &&
+            akuma_ex_stage2_enabled()) {
+            if (hit.hit == 1u) {
+                akuma_ex_stage2_restore("new-first-contact");
+                const uint32_t condition = load(row + 76u);
+                const uint32_t reaction = condition >= 0x30000000u &&
+                    condition <= 0x3fffffe0u ? load(condition + 20u) : 0u;
+                const auto expected = akuma_ex_reaction::stagger;
+                bool valid = reaction >= 0x30000000u &&
+                    reaction <= 0x3fffffa0u;
+                if (valid)
+                    for (unsigned i = 0; i < expected.size(); ++i)
+                        if (load16(reaction + akuma_ex_reaction::offsets[i]) != expected[i])
+                            valid = false;
+                if (valid) {
+                    g_akuma_probe.ex_reaction_owner = attacker;
+                    g_akuma_probe.ex_reaction_victim = victim;
+                    g_akuma_probe.ex_reaction_row = reaction;
+                    g_akuma_probe.ex_first_tick = g_akuma_probe.tick;
+                } else {
+                    std::fprintf(stderr,
+                        "akuma-ex-stage2,action=skip,reason=unexpected-reaction-layout\n");
+                }
+            } else if (hit.hit == 2u &&
+                       g_akuma_probe.ex_reaction_owner == attacker &&
+                       g_akuma_probe.ex_reaction_victim == victim) {
+                g_akuma_probe.ex_second_seen = true;
+            }
+        }
         // E11: hold the native EX projectile for exactly nine battle ticks
         // between its two real native collisions. This is default-off and
         // uses the same reversible, slot-validated gate as the Super.
@@ -3931,6 +4052,7 @@ void cafe::title::akuma_contact_probe_begin(const uint32_t fighters[2]) {
         g_akuma_probe.fighters[1] != fighters[1]) {
         akuma_super_gate_release("fighter-context-change");
         akuma_ex_gate_release("fighter-context-change");
+        akuma_ex_stage2_restore("fighter-context-change");
         g_akuma_probe.super_stop.reset();
         g_akuma_probe.ex.reset();
         g_akuma_probe.super.reset();
@@ -3940,6 +4062,7 @@ void cafe::title::akuma_contact_probe_begin(const uint32_t fighters[2]) {
     g_akuma_probe.fighters[1] = fighters[1];
     if (!fighters[0] || !fighters[1]) return;
     ++g_akuma_probe.tick;
+    akuma_ex_stage2_begin_frame();
     if (akuma_contact_runtime_enabled()) {
         for (unsigned side = 0; side != 2; ++side)
             g_akuma_probe.super_stop.bind(side, fighters[side]);
@@ -3970,6 +4093,7 @@ void cafe::title::akuma_contact_probe_end(const uint32_t fighters[2]) {
         fighters[1] == g_akuma_probe.fighters[1]) return;
     akuma_super_gate_release("probe-end");
     akuma_ex_gate_release("probe-end");
+    akuma_ex_stage2_restore("probe-end");
     g_akuma_probe.super_stop.reset();
     g_akuma_probe.ex.reset();
     g_akuma_probe.super.reset();
