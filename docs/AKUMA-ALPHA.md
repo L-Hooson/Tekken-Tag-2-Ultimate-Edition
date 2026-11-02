@@ -16,6 +16,7 @@ through the project's own importer and runtime without redistributing game data.
 | T7 contact-stop actions | Converter support gated, disabled in Akuma definition | Python regression tests committed; not yet executed |
 | Read-only native projectile collision probe | Wired into roster/practice under `TTT2_TRACE_AKUMA_CONTACT=1` | Windows runtime verification **pending** |
 | Runtime hitstop adapter | **Not yet ported** | Pending |
+| Reversible Shinku native inter-hit gate | Opt-in only; implemented and wired | **Fresh Windows build/game test pending** |
 | EX Hadoken second-hit reaction overlay | Verified reversible four-ID component; **not wired to live runtime** | Standalone C++ test passed locally |
 | EX Hadoken: complete two-hit reaction/knockdown/pushback | **Not yet ported** | Pending |
 | Super Fireball: five-hit per-impact hitstop | **Not yet ported** | Pending |
@@ -88,6 +89,36 @@ observation sequences.
 The standalone contact classifier is covered by `akuma_contact_gate_test`
 (Windows/Linux CMake/CTest). It passed a local C++ compile/run; **the full
 Windows runtime build and live clean-import trace remain unverified**.
+
+## Phase 82E: opt-in reversible native Shinku projectile gate
+
+The existing Phase 82C read-only contact probe now also supports an
+**experimental native gate**, explicitly disabled unless
+`TTT2_TEST_AKUMA_SUPER_GATE=1` is set. The original
+`TTT2_TRACE_AKUMA_CONTACT=1` diagnostic remains read-only.
+
+- After native damage dispatch, only Akuma's verified
+  `Ry_shinhadouken` five-contact projectile may arm the gate.
+- The first four accepted contacts temporarily zero native projectile speed
+  and enemy target mask; after **seven battle ticks**, the original values
+  are restored if the slot, row, and temporary values still match.
+- The verified projectile position is held around the native fighter-physics
+  call during the gated interval, matching the proven experimental approach.
+- Fighter swaps, slot retirement or reuse, changed memory, failed writes,
+  and mismatched native hit counters are handled conservatively. A failed
+  validation never writes restored values into a replacement row.
+- The final (fifth) hit is not gated. The normal EX Hadoken probe does not
+  mutate game memory.
+- `runtime/src/title/akuma_reversible_gate.h` contains the small reversible
+  component; `tests/akuma_reversible_gate_test.cpp` covers arm/restore,
+  position hold, recycled slots, unexpected memory changes and partial
+  native write failure. Its standalone C++ test compiled and passed locally.
+
+**Not yet implemented:** the gameplay animation/physics hitstop adapter,
+Shinku's actual 6/6/6/6/5 frame freezes, and the EX Hadoken reaction/
+pushback integration. This opt-in gate alone is **not** Phase 81D parity.
+The full game build and in-game validation are still pending. Do not
+replace the known-good local Phase 82A installation with the branch.
 
 ## Tested experimental reference (not committed)
 
