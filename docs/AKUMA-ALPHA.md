@@ -15,10 +15,10 @@ through the project's own importer and runtime without redistributing game data.
 | Approved EX/Super impact cadence (pure model) | Yes; `akuma_projectile_timing.h` | C++ test passed locally |
 | T7 contact-stop actions | Converter support gated, disabled in Akuma definition | Python regression tests committed; not yet executed |
 | Read-only native projectile collision probe | Wired into roster/practice under `TTT2_TRACE_AKUMA_CONTACT=1` | Windows runtime verification **pending** |
-| Runtime hitstop adapter | Experimental Shinku-only opt-in | **Fresh build/game test pending** |
+| Runtime hitstop adapter | Experimental Shinku and EX opt-ins | **Fresh build/game test pending** |
 | Reversible Shinku native inter-hit gate | Opt-in only; implemented and wired | **Fresh Windows build/game test pending** |
 | EX Hadoken second-hit reaction overlay | Verified reversible four-ID component; **not wired to live runtime** | Standalone C++ test passed locally |
-| EX Hadoken: complete two-hit reaction/knockdown/pushback | **Not yet ported** | Pending |
+| EX Hadoken: two-hit nine-tick gate / 8+5f stop | Optional runtime implementation; knockdown/pushback still missing | **Fresh build/game test pending** |
 | Super Fireball: five-hit per-impact hitstop | Experimental 6/6/6/6/5 runtime path | **Fresh build/game test pending** |
 | Source-physics Demon Flip/follow-up conversions | **Not yet ported** | Pending |
 | Normal-to-special cancellation parity | Requires further review | Pending |
@@ -41,13 +41,16 @@ through the project's own importer and runtime without redistributing game data.
 - `runtime/src/title/hitstop_model.h` is a pure battle-tick timing model
   with explicit fighter lifecycle and bounded frame scheduling. It is
   **connected only for the experimental Shinku runtime path**, using
-  post-native-dispatch contact classification. General imported contact-stop
-  actions are not connected. A fresh runtime test is still required.
+  post-native-dispatch contact classification for both Shinku and EX (separate
+  default-off environment flags). General imported contact-stop actions are
+  not connected. A fresh runtime test is still required.
 - `runtime/src/title/akuma_projectile_timing.h` preserves the approved
   EX Hadoken 8/5-frame stops at nine-tick spacing and Super Fireball
   6/6/6/6/5-frame stops at seven-tick spacing, without writing guest memory.
   Its source-only C++ test passed locally. Shinku's timing values are now
-  consumed by the opt-in contact callback; EX remains model-only.
+  consumed by the opt-in contact callback; EX also has a separately enabled
+  native nine-tick gate and 8/5-frame stop. The EX knockdown/pushback overlay
+  has not yet been connected.
 - `convert/moveset.py` can preserve raw Tekken 7 action IDs 0x8292/0x8293
   behind `HITSTOP_CONTACT_ACTIONS`, which deliberately remains disabled
   in Akuma's character definition until the runtime adapter exists.
@@ -109,8 +112,8 @@ The existing Phase 82C read-only contact probe now also supports an
 - Fighter swaps, slot retirement or reuse, changed memory, failed writes,
   and mismatched native hit counters are handled conservatively. A failed
   validation never writes restored values into a replacement row.
-- The final (fifth) hit is not gated. The normal EX Hadoken probe does not
-  mutate game memory.
+- The final (fifth) hit is not gated. The normal EX Hadoken probe remains
+  read-only unless the new separate `TTT2_TEST_AKUMA_EX_RUNTIME=1` flag is set.
 - `runtime/src/title/akuma_reversible_gate.h` contains the small reversible
   component; `tests/akuma_reversible_gate_test.cpp` covers arm/restore,
   position hold, recycled slots, unexpected memory changes and partial
@@ -123,11 +126,50 @@ These two clocks are independent of the 71-frame Super cinematic.
 `TTT2_TEST_AKUMA_SUPER_GATE=1` alone still enables gate-only testing.
 No opt-in is enabled for ordinary matches.
 
-**Not yet implemented:** EX Hadoken's full two-hit reaction/pushback
-integration, general T7 contact action dispatch, and production-default
+**Not yet implemented:** EX Hadoken's knockdown reaction and second-hit
+pushback integration, general T7 contact action dispatch, and production-default
 hitstop behaviour. The complete Windows game build and clean-import
 in-game validation remain pending. Do not replace the working local
 Phase 82A installation with this source branch yet.
+
+## Phase 82F: EX two-hit gate and repeat-projectile lifecycle
+
+- The E11 normal/EX Hadoken pilot is integrated behind a **separate**
+  `TTT2_TEST_AKUMA_EX_RUNTIME=1` runtime switch. This is **off by default**.
+- Confirmed native EX Hadoken contact must satisfy the observed E11 projectile
+  layout (capacity 2, speed 100, enemy mask 1), Akuma ownership, the active
+  opponent and accepted native damage flags. Only then can the reversible
+  gate temporarily stop native projectile motion and targeting for **nine
+  battle ticks**, restoring the verified values on release or a context change.
+- The approved two-impact defender freeze values **8f then 5f** are scheduled
+  through the existing per-fighter hitstop adapter. This does **not** yet
+  implement the tested second-hit knockdown/reaction-table substitution or
+  pushback: the live EX path is still incomplete.
+- A completed EX or Super sequence can now re-arm on a fresh full-capacity
+  first-contact counter after the applicable 9- or 7-tick interval, including
+  when the native engine reuses the same projectile slot and row. Contact
+  repeat tests were added to the pure timing model.
+- The selected original T7 contact actions remain **disabled** for Akuma until
+  a separate verified native property adapter is ready. Do not enable
+  `HITSTOP_CONTACT_ACTIONS` merely to enable the EX/Super collision pilot.
+- `.github/workflows/akuma-source-checks.yml` adds source-only GitHub checks
+  for aerial Tatsu, conversion opt-ins, EX reaction overlay, the two projectile
+  timing models, and hitstop scheduling. They require no redistributed game
+  files. Workflow execution or success is **not yet confirmed**.
+
+### Safe development switches
+
+| Variable | Effect | Default |
+| --- | --- | --- |
+| `TTT2_TRACE_AKUMA_CONTACT=1` | Read-only projectile logs | Off |
+| `TTT2_TEST_AKUMA_SUPER_GATE=1` | Reversible Shinku seven-tick gate only | Off |
+| `TTT2_TEST_AKUMA_SUPER_RUNTIME=1` | Shinku gate plus 6/6/6/6/5f stops | Off |
+| `TTT2_TEST_AKUMA_EX_RUNTIME=1` | EX gate plus 8/5f stops; no reaction rewrite | Off |
+| `TTT2_TEST_AKUMA_NEUTRAL_METER=1` | Practice-only idle refill | Off |
+
+**None of the new EX/Super runtime features has been end-to-end validated in
+a fresh native game build.** Keep the previously tested Phase 82A installation
+untouched and do not make the experimental switches the default.
 
 ## Tested experimental reference (not committed)
 
