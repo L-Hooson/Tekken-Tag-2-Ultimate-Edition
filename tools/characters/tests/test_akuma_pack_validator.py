@@ -58,7 +58,7 @@ class ValidatorTests(unittest.TestCase):
         m.tables['cancels'][0]['move_id'] = 0
         result = validate(m)
         self.assertFalse(result['ok'])
-        self.assertIn('T7 EX/normal', result['failures'][0])
+        self.assertIn('six source EX/normal routes', result['failures'][0])
 
     def test_wrong_ex_count_fails(self):
         m = SyntheticPack()
