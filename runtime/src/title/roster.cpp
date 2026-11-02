@@ -3740,8 +3740,9 @@ struct AkumaContactProbe {
     akuma_projectile::Sequence ex{akuma_projectile::Kind::ex_hadoken};
     akuma_projectile::Sequence super{akuma_projectile::Kind::shinku_hadoken};
     akuma_projectile::ReversibleGate super_gate;
-    hitstop::Model super_stop; // opt-in: independent of cinematic gauge stop
-    uint32_t super_owner = 0;
+    akuma_projectile::ReversibleGate ex_gate;
+    hitstop::Model super_stop; // shared per-impact stop; independent of cinematic gauge stop
+    uint32_t super_owner = 0, ex_owner = 0;
 } g_akuma_probe;
 
 bool akuma_super_runtime_enabled() {
@@ -3750,6 +3751,18 @@ bool akuma_super_runtime_enabled() {
         return s && std::strcmp(s, "1") == 0;
     }();
     return enabled;
+}
+bool akuma_ex_runtime_enabled() {
+    // E11 two-hit EX Hadoken pilot. Separate from the approved Super flag;
+    // disabled by default while the reaction/pushback overlay is reviewed.
+    static const bool enabled = [] {
+        const char* s = std::getenv("TTT2_TEST_AKUMA_EX_RUNTIME");
+        return s && std::strcmp(s, "1") == 0;
+    }();
+    return enabled;
+}
+bool akuma_contact_runtime_enabled() {
+    return akuma_super_runtime_enabled() || akuma_ex_runtime_enabled();
 }
 bool akuma_super_gate_enabled() {
     // Runtime mode implies the seven-tick native gate. Both are opt-in.
@@ -3760,7 +3773,7 @@ bool akuma_super_gate_enabled() {
     return gate_only || akuma_super_runtime_enabled();
 }
 bool akuma_super_frozen(uint32_t player) {
-    if (!akuma_super_runtime_enabled() || !player) return false;
+    if (!akuma_contact_runtime_enabled() || !player) return false;
     for (unsigned side = 0; side != 2; ++side)
         if (player == g_akuma_probe.fighters[side])
             return g_akuma_probe.super_stop.frozen(side);
@@ -3771,7 +3784,7 @@ bool akuma_probe_enabled() {
         const char* s = std::getenv("TTT2_TRACE_AKUMA_CONTACT");
         return s && std::strcmp(s, "1") == 0;
     }();
-    return trace || akuma_super_gate_enabled();
+    return trace || akuma_super_gate_enabled() || akuma_ex_runtime_enabled();
 }
 void akuma_super_gate_release(const char* reason) {
     if (!g_akuma_probe.super_gate.active()) return;
@@ -3785,6 +3798,27 @@ void akuma_super_gate_release(const char* reason) {
     }
     std::fprintf(stderr, "akuma-super-gate,action=release,reason=%s,restored=%u\n",
                  reason, restored ? 1u : 0u);
+}
+void akuma_ex_gate_release(const char* reason) {
+    if (!g_akuma_probe.ex_gate.active()) return;
+    const auto read = [](uint32_t address) { return load(address); };
+    const auto write = [](uint32_t address, uint32_t v) { store(address, v); };
+    const bool restored = g_akuma_probe.ex_gate.release(read, write);
+    g_akuma_probe.ex_owner = 0;
+    if (!restored) {
+        g_akuma_probe.ex.reset(); // never continue after projectile slot reuse
+        g_akuma_probe.super_stop.reset();
+    }
+    std::fprintf(stderr, "akuma-ex-gate,action=release,reason=%s,restored=%u\n",
+                 reason, restored ? 1u : 0u);
+}
+void akuma_ex_gate_hold(uint32_t player) {
+    if (!akuma_ex_runtime_enabled() || !player || player != g_akuma_probe.ex_owner)
+        return;
+    const auto read = [](uint32_t address) { return load(address); };
+    const auto write = [](uint32_t address, uint32_t v) { store(address, v); };
+    if (!g_akuma_probe.ex_gate.hold(read, write))
+        akuma_ex_gate_release("projectile-slot-or-row-changed");
 }
 void akuma_super_gate_hold(uint32_t player) {
     if (!akuma_super_gate_enabled() || !player || player != g_akuma_probe.super_owner)
@@ -3825,6 +3859,23 @@ void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
             ? g_akuma_probe.ex : g_akuma_probe.super;
         const auto hit = seq.accept({g_akuma_probe.tick, attacker, victim,
                                     slot, row, shot.remaining_after_hit});
+        // E11: hold the native EX projectile for exactly nine battle ticks
+        // between its two real native collisions. This is default-off and
+        // uses the same reversible, slot-validated gate as the Super.
+        if (hit.accepted && hit.gate_next &&
+            kind == akuma_contact::Kind::ex_hadoken && akuma_ex_runtime_enabled()) {
+            const auto read = [](uint32_t address) { return load(address); };
+            const auto write = [](uint32_t address, uint32_t v) { store(address, v); };
+            if (!g_akuma_probe.ex_gate.arm(slot, row, shot.speed,
+                                           shot.enemy_mask, read, write)) {
+                seq.reset();
+                std::fprintf(stderr, "akuma-ex-gate,action=reject,reason=native-layout\n");
+                return;
+            }
+            g_akuma_probe.ex_owner = attacker;
+            std::fprintf(stderr, "akuma-ex-gate,action=arm,tick=%llu,hit=%u,interval=9\n",
+                         static_cast<unsigned long long>(g_akuma_probe.tick), hit.hit);
+        }
         if (hit.accepted && hit.gate_next &&
             kind == akuma_contact::Kind::shinku_hadoken && akuma_super_gate_enabled()) {
             const auto read = [](uint32_t address) { return load(address); };
@@ -3837,6 +3888,16 @@ void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
             g_akuma_probe.super_owner = attacker;
             std::fprintf(stderr, "akuma-super-gate,action=arm,tick=%llu,hit=%u,interval=7\n",
                          static_cast<unsigned long long>(g_akuma_probe.tick), hit.hit);
+        }
+        if (hit.accepted && kind == akuma_contact::Kind::ex_hadoken &&
+            akuma_ex_runtime_enabled()) {
+            const unsigned side = victim == g_akuma_probe.fighters[0] ? 0u : 1u;
+            // E11's two-impact freeze durations: first 8f, second 5f.
+            // The native reaction commits on the following simulation tick.
+            g_akuma_probe.super_stop.set(side, hitstop::Timing{1u, hit.freeze});
+            std::fprintf(stderr, "akuma-ex-stop,tick=%llu,hit=%u,side=%u,frames=%u\n",
+                         static_cast<unsigned long long>(g_akuma_probe.tick),
+                         hit.hit, side, hit.freeze);
         }
         if (hit.accepted && kind == akuma_contact::Kind::shinku_hadoken &&
             akuma_super_runtime_enabled()) {
@@ -3869,6 +3930,7 @@ void cafe::title::akuma_contact_probe_begin(const uint32_t fighters[2]) {
         g_akuma_probe.fighters[0] != fighters[0] ||
         g_akuma_probe.fighters[1] != fighters[1]) {
         akuma_super_gate_release("fighter-context-change");
+        akuma_ex_gate_release("fighter-context-change");
         g_akuma_probe.super_stop.reset();
         g_akuma_probe.ex.reset();
         g_akuma_probe.super.reset();
@@ -3878,16 +3940,23 @@ void cafe::title::akuma_contact_probe_begin(const uint32_t fighters[2]) {
     g_akuma_probe.fighters[1] = fighters[1];
     if (!fighters[0] || !fighters[1]) return;
     ++g_akuma_probe.tick;
-    if (akuma_super_runtime_enabled()) {
+    if (akuma_contact_runtime_enabled()) {
         for (unsigned side = 0; side != 2; ++side)
             g_akuma_probe.super_stop.bind(side, fighters[side]);
         g_akuma_probe.super_stop.advance();
     }
-    g_akuma_probe.ex.release_due(g_akuma_probe.tick);
+    if (g_akuma_probe.ex.release_due(g_akuma_probe.tick))
+        akuma_ex_gate_release("nine-tick-release");
     if (g_akuma_probe.super.release_due(g_akuma_probe.tick))
         akuma_super_gate_release("seven-tick-release");
     // If TTT2 discarded or reused a projectile before the release tick,
     // fail closed immediately and never overwrite the replacement row.
+    if (g_akuma_probe.ex_gate.active()) {
+        const uint32_t slot = g_akuma_probe.ex_gate.slot();
+        if (load(slot + 60u) != g_akuma_probe.ex_gate.row() ||
+            load(slot + 32u) == 0xFFFFFFFFu)
+            akuma_ex_gate_release("projectile-slot-lost");
+    }
     if (g_akuma_probe.super_gate.active()) {
         const uint32_t slot = g_akuma_probe.super_gate.slot();
         if (load(slot + 60u) != g_akuma_probe.super_gate.row() ||
@@ -3900,6 +3969,7 @@ void cafe::title::akuma_contact_probe_end(const uint32_t fighters[2]) {
     if (fighters[0] == g_akuma_probe.fighters[0] &&
         fighters[1] == g_akuma_probe.fighters[1]) return;
     akuma_super_gate_release("probe-end");
+    akuma_ex_gate_release("probe-end");
     g_akuma_probe.super_stop.reset();
     g_akuma_probe.ex.reset();
     g_akuma_probe.super.reset();
@@ -4399,9 +4469,9 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
     if (own) trace_assist_follow(player);
     const auto it = own ? g_arcs.find(player) : g_arcs.end();
     if (it == g_arcs.end() || it->second.mode == Arc2D::kNone) {
-        akuma_super_gate_hold(player);
+        akuma_super_gate_hold(player);\n        akuma_ex_gate_hold(player);
         sub_04336854_orig(ctx, base);
-        akuma_super_gate_hold(player);
+        akuma_super_gate_hold(player);\n        akuma_ex_gate_hold(player);
         if (own) correct_noctis_assault_exit(player);
         return;
     }
@@ -4422,9 +4492,9 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
         if ((mode == 0 || mode == 2) && loadf(player + kPlayerY) > 0.0f && load8(player + kPlayerHover) == 0)
             storef(player + kPlayerVy, loadf(player + kPlayerVy) - (s.g - kTitleGravity) * slow_motion(player));
     }
-    akuma_super_gate_hold(player);
+    akuma_super_gate_hold(player);\n    akuma_ex_gate_hold(player);
     sub_04336854_orig(ctx, base);
-    akuma_super_gate_hold(player);
+    akuma_super_gate_hold(player);\n    akuma_ex_gate_hold(player);
     if (own) correct_noctis_assault_exit(player);
     const uint32_t move = load(player + kPlayerMove);
     if (hangs && move == s.move) storef(player + kPlayerY, hang_y), storef(player + kPlayerVy, 0.0f);
