@@ -70,6 +70,20 @@ def validate(m):
             failures.append(f'{move}: {hits} projectile hit(s), expected {expected}')
         else:
             passed.append(f'{move}: {hits} native projectile hits')
+        if move == 'Ry_EX_hadoh':
+            hc = struct.unpack('>34I', raw)[19]
+            conditions = m.tables.get('hit_conditions', [])
+            reactions = m.tables.get('reactions', [])
+            target = conditions[hc + 1]['reactions'] if hc + 1 < len(conditions) else None
+            fields = ('default', 'left', 'right', 'back')
+            isolated = (target is not None and 5 <= target < len(reactions) and
+                        sum(h['reactions'] == target for h in conditions) == 1 and
+                        tuple(reactions[target].get(f) for f in fields) == (2504, 2505, 2506, 2507) and
+                        tuple(reactions[target - 5].get(f) for f in fields) == (2516, 2517, 2518, 2519))
+            if isolated:
+                passed.append('EX stage-two reaction is private; reviewed pushback source retained')
+            else:
+                failures.append('EX stage-two reaction ownership/layout is unsafe')
     return {'passed': passed, 'failures': failures, 'pass_count': len(passed),
             'fail_count': len(failures), 'ok': not failures}
 

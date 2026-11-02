@@ -10,7 +10,9 @@ TEKKEN7_ID = 32
 TEKKEN7_CODE = 'mrx'
 CODE = 'mrx'
 SEX = 'male'
-REVISION = 6                  # 5: aerial Tatsu; 6: source-built two-stage EX Hadoken
+REVISION = 7                  # source-clock Demon Flip and faithful special-cancel windows
+HITSTOP_CONTACT_ACTIONS = True  # runtime dispatch remains default-off
+SOURCE_PHYSICS_ARCS = frozenset({'Mx_hyakiC', 'Mx_hyakiD'})
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
 PRESETS = (
@@ -136,11 +138,10 @@ MOVESET = {
     'noncontact_special_cancels': ('Ry_hadohB', 'Ry_hadoh', 'Ry_Shadoh', 'Ry_ShadohB', 'Ry_ShadohB2'),
     # Preserve T7's early motion capture and contact-time dispatch.
     'buffered_special_cancels': True,
-    'buffered_special_timing': {
-        'extra_frames': 8,
-        'source_extra_frames': {'Co_s_trp00': 12, 'Mx_s_tlk00': 12, 'Co_t_slk00': 12, 'Mx_syalk00': 12},  # WS+2
-        'motion_window': 24,
-    },
+    # Preserve both capture and dispatch windows from the source, including
+    # early capture rows that end before the automatic dispatch window.
+    'source_special_windows': True,
+    'akuma_contact_latch': True,
     'normal_string_followups': {
         'Mx_lp00': ('Mx_lplp', 'Mx_lprp00'),
         'Co_t_slp00': ('Co_syarp03',),

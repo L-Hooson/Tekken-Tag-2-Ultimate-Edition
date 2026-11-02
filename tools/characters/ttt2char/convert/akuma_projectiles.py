@@ -48,3 +48,27 @@ def ex_hadoken_hits(k, projectile_index):
         first['hit_condition'] == second['hit_condition']):
         raise ValueError('EX two-stage projectile fields differ from verified T7 layout')
     return 2
+
+
+def isolate_ex_reaction(tables, hc, count):
+    """Give the runtime stage-two overlay an EX-only reaction row.
+
+    Keep the verified five-row relative pushback source in the private block.
+    All pushback objects remain read-only; only the private row's pointers and
+    four reaction IDs may be overlaid. The hit conditions were just appended
+    by conv_hitconds and must not be shared with a different move.
+    """
+    conditions = tables['hit_conditions']
+    reactions = tables['reactions']
+    if hc is None or count != 2 or hc + count != len(conditions):
+        raise ValueError('EX Hadoken requires two newly converted hit conditions')
+    target = conditions[hc + 1]['reactions']
+    fields = ('default', 'left', 'right', 'back')
+    if (target is None or not 5 <= target < len(reactions) or
+        tuple(reactions[target][f] for f in fields) != (2504, 2505, 2506, 2507) or
+        tuple(reactions[target - 5][f] for f in fields) != (2516, 2517, 2518, 2519)):
+        raise ValueError('EX Hadoken reaction/pushback layout differs from reviewed source')
+    private = len(reactions) + 5
+    reactions.extend(dict(row) for row in reactions[target - 5:target + 1])
+    conditions[hc + 1] = dict(conditions[hc + 1], reactions=private)
+    return private

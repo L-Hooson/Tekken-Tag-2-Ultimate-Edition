@@ -1419,6 +1419,9 @@ class Converter:
             if i not in self.newidx:
                 continue
             row, mv = self.T['moves'][self.newidx[i]], k.tables['moves'][i]
+            if k.move_name(i) in getattr(self.defn, 'SOURCE_PHYSICS_ARCS', ()):
+                self.source_physics_arc(i, f0, value)
+                continue
             a, g, _ = arcs.params(value)
             hold = mv['ground_fall'] or mv['airborne_end']
             off, name = mv['anim'], k.anim_name(i)
@@ -1457,6 +1460,65 @@ class Converter:
                     c['start_frame'] += ext
             row['cancel'] = len(self.T['cancels'])
             self.T['cancels'] += cl
+
+    def source_physics_arc(self, i, f0, value):
+        """A verified, opt-in ground arc plus its air continuation metadata."""
+        mv = self.k.tables['moves'][i]
+        dec = arcs.decode_t7(self.k, mv['anim'])
+        if not (0 <= f0 < arcs.SOURCE_PHYSICS) or not arcs.params(value)[2]:
+            raise ValueError('source ground arc requires explicit initial height and frame < 128')
+        modes = sorted((f, v) for f, p, v in M.xps(self.k, mv['extraprops'])
+                       if p == arcs.MOVEMENT_MODE and f < 0x4000)
+        floor = arcs.landing_height(dec, mv['ground_fall'])
+        desc, values = arcs.source_motion(dec, floor, f0=f0, modes=modes)
+        row = self.T['moves'][self.newidx[i]]
+        row['anim'] = ANIM_PACK | (self.pack0_count + len(self.new_anims))
+        self.new_anims.append(arcs.encode(desc, values))
+        # Private copy: extra-property lists may be shared by other moves.
+        props = []
+        for p in self.T['extra_move_properties'][row['extraprops']:]:
+            if p['id'] == 0 and p['frame'] == 0:
+                break
+            if p['id'] == arcs.BAKED:
+                props.append(dict(frame=f0, id=arcs.AIR_MARK, value=arcs.float_word(floor)))
+                props.append(dict(frame=f0, id=arcs.BAKED,
+                                  value=(value & 0xFFFFFF00) | f0 | arcs.SOURCE_PHYSICS))
+            else:
+                props.append(dict(p))
+        row['extraprops'] = len(self.T['extra_move_properties'])
+        self.T['extra_move_properties'] += props + [dict(frame=0, id=0, value=0)]
+        self.stats['2D arcs: source-clock ground moves'] += 1
+
+    def source_air_motions(self):
+        """Demon Flip continuations: mode 3 uses physical height, not pose Y.
+
+        Follow cancel targets (including EX air fireballs), not name prefixes.
+        Eliza and Geese are untouched. Unknown movement modes fail rather than guess.
+        """
+        if not getattr(self.defn, 'SOURCE_PHYSICS_ARCS', ()):
+            return
+        for i in sorted(arcs.continuations(self.k, self.defn.SOURCE_PHYSICS_ARCS)):
+            if i not in self.newidx:
+                continue
+            idx = self.newidx[i]
+            mv = self.k.tables['moves'][i]
+            props = M.xps(self.k, mv['extraprops'])
+            modes = sorted((f, v) for f, p, v in props if p == arcs.MOVEMENT_MODE and f < 0x4000)
+            dec = arcs.decode_t7(self.k, mv['anim'])
+            floor = arcs.landing_height(dec, mv['ground_fall'])
+            desc, values = arcs.source_motion(dec, floor, modes=modes)
+            row = self.T['moves'][idx]
+            row['anim'] = ANIM_PACK | (self.pack0_count + len(self.new_anims))
+            self.new_anims.append(arcs.encode(desc, values))
+            rows = []
+            for p in self.T['extra_move_properties'][row['extraprops']:]:
+                if p['id'] == 0 and p['frame'] == 0:
+                    break
+                rows.append(dict(p, value=arcs.float_word(floor)) if p['id'] == arcs.AIR_MARK else dict(p))
+            rows += arcs.followup_pause_rows(self.name(i), props)
+            row['extraprops'] = len(self.T['extra_move_properties'])
+            self.T['extra_move_properties'] += rows + [dict(frame=0, id=0, value=0)]
+            self.stats['2D arcs: source-height air moves'] += 1
 
     def conv_props(self, table, i):
         if i is None:
@@ -1562,6 +1624,7 @@ class Converter:
         v = struct.unpack('<42I', p['raw'])
         out = [0] * 34
         out[0] = PROJ_EFFECT
+        ex_two_hits = False
         for to, fr, n in PROJ_FIELDS:
             out[to:to + n] = v[fr:fr + n]
         if self.gauge and out[4]:                           # its hits on one fighter (convert/gauge.py)
@@ -1571,6 +1634,7 @@ class Converter:
                 hits = akuma_projectiles.ex_hadoken_hits(self.k, pi)
                 if hits is not None:
                     out[4] = hits
+                    ex_two_hits = True
                     self.stats['Akuma EX Hadoken two-contact projectile reconstructed'] += 1
         for f in PROJ_SOUNDS:
             if out[f] and out[f] not in self.known_sounds and not self.own_voice(out[f]):
@@ -1581,6 +1645,9 @@ class Converter:
             self.stats['projectile hit sounds (item sounds of its own)'] += 1
         n0 = len(self.T['hit_conditions'])
         hc = self.conv_hitconds(p['hit_condition'])
+        if ex_two_hits:
+            akuma_projectiles.isolate_ex_reaction(self.T, hc, len(self.T['hit_conditions']) - n0)
+            self.stats['Akuma EX Hadoken private reaction block'] += 1
         out[19] = hc if hc is not None and len(self.T['hit_conditions']) > n0 else 0
         out[20] = self.conv_proj_cancels(p['cancel'])
         idx = self.add('projectiles', {'raw': struct.pack('>34I', *out)})
@@ -1827,6 +1894,7 @@ class Converter:
         self.own_transitions()
         self.link_queued(counterpart)          # Tekken 7 generic movement states the last two reached
         self.bake_arcs()
+        self.source_air_motions()
         self.stats['grounded Screw launches preserve Bound'] += len(
             tagsystem.preserve_grounded_screw_bound(self.T, self.move_name))
         self.stats['native running collision exits restored'] += tagsystem.restore_running_contacts(

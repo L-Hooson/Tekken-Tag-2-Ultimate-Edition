@@ -946,6 +946,7 @@ PPC_FUNC(sub_0414FA10) {
 // for its start and its position reset).
 PPC_FUNC(sub_039C2DB0_orig);
 PPC_FUNC(sub_039C2DB0) {
+    cafe::title::akuma_contact_reset();
     cafe::title::gauge::situation(ctx.r[3]);
     sub_039C2DB0_orig(ctx, base);
 }

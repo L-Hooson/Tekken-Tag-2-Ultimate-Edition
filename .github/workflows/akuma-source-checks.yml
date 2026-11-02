@@ -8,9 +8,10 @@ on:
     paths:
       - 'runtime/src/title/akuma_*.h'
       - 'runtime/src/title/hitstop_model.h'
+      - 'runtime/src/title/air_timing.h'
       - 'runtime/src/title/roster.cpp'
       - 'tools/characters/ttt2char/**'
-      - 'tools/characters/tests/test_aerial_tatsu.py'
+      - 'tools/characters/tests/**'
       - 'tests/akuma_*_test.cpp'
       - 'tests/hitstop_model_test.cpp'
       - '.github/workflows/akuma-source-checks.yml'
@@ -36,6 +37,10 @@ jobs:
         run: python -m unittest discover -s tools/characters/tests -p test_akuma_projectiles.py -v
       - name: Test generated-pack acceptance verifier (synthetic data)
         run: python -m unittest discover -s tools/characters/tests -p test_akuma_pack_validator.py -v
+      - name: Verify source Demon Flip and exact special-cancel windows
+        run: |
+          python -m unittest discover -s tools/characters/tests -p test_akuma_source_arcs.py -v
+          python -m unittest discover -s tools/characters/tests -p test_specialbuffer.py -v
       - name: Validate importer source modules
         run: python -m compileall -q tools/characters/ttt2char/convert tools/characters/ttt2char/characters/akuma.py
       - name: Verify contact action conversion remains opt-in

@@ -11,6 +11,8 @@
 #include "title/akuma_ex_reaction.h"
 #include "title/akuma_ex_pushback.h"
 #include "title/hitstop_model.h"
+#include "title/air_timing.h"
+#include "title/akuma_contact_actions.h"
 #include "outfit_menu.h"
 
 #include "cafe/ppc_ops.h"
@@ -3620,16 +3622,177 @@ constexpr float kTitleGravity = 6.0f;             // 0x102520E4
 constexpr uint32_t kArcProp = 0x8226, kArcBakedProp = 0x822D, kArcAirMoveProp = 0x822C;
 constexpr uint32_t kHeld = 2;                     // player +424 while an air move waits for the touchdown
 
+// The source 0x822B is unrelated to TTT2's summoned-weapon hold ID.
+// Only the three verified Demon Flip follow-ups opt into this meaning.
+bool dflip_followup(uint32_t move) {
+    const std::string_view n = move && load(move) ? reinterpret_cast<const char*>(guest_pointer(load(move))) : "";
+    return n == "Mx_hyaki_gouB" || n == "Mx_hyaki_gouLK" || n == "Mx_hyaki_gouD";
+}
+bool dflip_followup_enabled() {
+    const char* v = std::getenv("TTT2_TEST_DFLIP_FOLLOWUP_FIX");
+    return v && std::string_view(v) == "1";
+}
+bool dflip_entry_pause(uint32_t move) {
+    if (!dflip_followup(move)) return false;
+    for (uint32_t p = load(move + kMoveProperties), n = 0; p && n < 256; p += 12, ++n) {
+        if (!load(p) && !load(p + 4)) break;
+        if (load(p) == 0x8001 && load(p + 4) == 0x822B && load(p + 8) == 1) return true;
+    }
+    return false;
+}
+
 struct Arc2D {
     enum Mode { kNone, kBaked, kPhysics } mode = kNone;
     float a = 0, g = 0;
     uint32_t move = 0;      // kBaked: the baked move; kPhysics: the air move
     int32_t f0 = 0, n = 0;  // kBaked: the arc's first frame, the frame of the last step - f0
     float y = 0, vy = 0;    // kPhysics: after the last step
+    float floor = 0;        // source physical-Y landing reference
+    bool source = false, followup_pause = false;
 };
 std::map<uint32_t, Arc2D> g_arcs; // by player
+uint64_t g_source_arc_tick = 0;
+
+bool akuma_super_frozen(uint32_t player);
+
+// Original T7 contact actions are retained in revision 7 packs, but the
+// Phase 82A move whitelist remains an explicit local opt-in. These clocks do
+// not skip input collection or cancel evaluation, and do not use gauge::kStop.
+hitstop::Model g_contact_stop;
+uint32_t g_contact_players[2]{};
+uint64_t g_contact_identity[2]{};
+bool g_contact_enabled = false;
+struct ContactAction {
+    uint32_t actor, opponent, row, id, value, move, move_frame;
+};
+std::vector<ContactAction> g_contact_actions;
+akuma_contact::Actions g_contact_seen[2];
+int contact_side(uint32_t p) {
+    return p && p == g_contact_players[0] ? 0 : p && p == g_contact_players[1] ? 1 : -1;
+}
+bool contact_frozen(uint32_t player) {
+    const int side = contact_side(player);
+    return g_contact_enabled && side >= 0 && g_contact_stop.frozen(static_cast<unsigned>(side));
+}
+bool contact_test_move(std::string_view name) {
+    // PHASE79_SPECIALS_WHITELIST: baseline remains available with specials flag off.
+    if (name == "Ry_shoryuB" ||
+        name == "Ry_shoryuB2" ||
+        name == "Ry_shoryuB3" ||
+        name == "Ry_shoryuB4") return true;
+    // Neither Tekken 7 ordinary jabs nor unrelated fighters are changed.
+    const char* specials = std::getenv("TTT2_HITSTOP_SPECIALS");
+    if (!specials || std::strcmp(specials, "1") != 0) return false;
+    return name == "Mx_hyaki_gouA" ||
+           name == "Mx_hyaki_gouB" ||
+           name == "Mx_hyaki_gouD" ||
+           name == "Mx_hyaki_gouLK" ||
+           name == "Mx_saving" ||
+           name == "Mx_saving2" ||
+           name == "Mx_saving3" ||
+           name == "Mx_saving_cn" ||
+           name == "Mx_saving_cn2" ||
+           name == "Mx_saving_cn3" ||
+           name == "Mx_tatumaki_air" ||
+           name == "Mx_tatumaki_airB" ||
+           name == "Mx_tatumaki_airEX" ||
+           name == "Mx_tatumaki_airEXB" ||
+           name == "Mx_tatumaki_airEXF" ||
+           name == "Mx_tatumaki_airF" ||
+           name == "Ry_6lrk_EXtatumaki" ||
+           name == "Ry_6lrk_EXtatumaki2" ||
+           name == "Ry_6lrk_EXtatumaki3" ||
+           name == "Ry_EXtatumaki" ||
+           name == "Ry_EXtatumaki2" ||
+           name == "Ry_EXtatumaki3" ||
+           name == "Ry_EXtatumaki4" ||
+           name == "Ry_shoryu" ||
+           name == "Ry_shoryu3" ||
+           name == "Ry_shoryuB2EX" ||
+           name == "Ry_shoryuB2EX_m" ||
+           name == "Ry_shoryuB3EX" ||
+           name == "Ry_shoryuB4EX" ||
+           name == "Ry_shoryuBEX" ||
+           name == "Ry_shoryuBEX_tmk" ||
+           name == "Ry_shoryuB_tmk" ||
+           name == "Ry_shoryu_tmk" ||
+           name == "Ry_tatumaki" ||
+           name == "Ry_tatumaki2" ||
+           name == "Ry_tatumaki2b" ||
+           name == "Ry_tatumaki3" ||
+           name == "Ry_tatumaki3b" ||
+           name == "Ry_tatumaki4" ||
+           name == "Ry_tatumakiB";
+}
+
+void contact_stop_action(uint32_t player, uint32_t row, uint32_t id, uint32_t value) {
+    if (!g_contact_enabled || contact_side(player) < 0) return;
+    const int slot = added_slot(player);
+    if (slot < 0 || g_added[slot].code != "mrx" || load(player + 0x1e88)) return;
+    const uint32_t move = load(player + kPlayerMove);
+    const std::string_view name = move && load(move) ?
+        reinterpret_cast<const char*>(guest_pointer(load(move))) : "";
+    if (!contact_test_move(name)) return;
+    const uint32_t opponent = load(player + 0x98);
+    if (contact_side(opponent) < 0 || opponent == player) return;
+    if (!akuma_contact::hit_or_block(load(opponent + 1152))) return;
+    auto& seen = g_contact_seen[contact_side(player)];
+    seen.begin(g_contact_identity[contact_side(player)], move, load(player + kPlayerFrame));
+    if (!seen.accept(row)) return;
+    if (std::any_of(g_contact_actions.begin(), g_contact_actions.end(), [&](const ContactAction& a) {
+            return a.actor == player && a.row == row && a.id == id;
+        })) return; // interpreter can dispatch the same action repeatedly in one tick
+    g_contact_actions.push_back({player, opponent, row, id, value, move, load(player + kPlayerFrame)});
+}
+
+void contact_actions_begin(const uint32_t fighters[2]) {
+    const char* setting = std::getenv("TTT2_HITSTOP_LP_HEAVY");
+    g_contact_enabled = setting && std::strcmp(setting, "1") == 0;
+    g_contact_actions.clear();
+    uint64_t identity[2]{};
+    for (unsigned side = 0; side != 2; ++side) {
+        const uint32_t p = fighters[side];
+        identity[side] = p ? (uint64_t{load(p + 136)} << 32) | load(p + kPlayerSelectId) : 0;
+    }
+    if (!g_contact_enabled || !fighters[0] || !fighters[1] ||
+        !std::equal(fighters, fighters + 2, g_contact_players) ||
+        !std::equal(identity, identity + 2, g_contact_identity)) {
+        g_contact_stop.reset();
+        for (auto& seen : g_contact_seen) seen.reset();
+    }
+    if (!std::equal(fighters, fighters + 2, g_contact_players) ||
+        !std::equal(identity, identity + 2, g_contact_identity)) g_arcs.clear();
+    std::copy(fighters, fighters + 2, g_contact_players);
+    std::copy(identity, identity + 2, g_contact_identity);
+    if (!g_contact_enabled) return;
+    for (unsigned side = 0; side != 2; ++side) {
+        g_contact_stop.bind(side, identity[side]);
+        // Observe non-contact frames too: a repeated execution of the same
+        // move must reset its ledger when the native move frame returns to 0.
+        g_contact_seen[side].begin(identity[side], load(fighters[side] + kPlayerMove),
+                                   load(fighters[side] + kPlayerFrame));
+    }
+    g_contact_stop.advance();
+}
+void contact_actions_end(const uint32_t fighters[2]) {
+    if (!g_contact_enabled) return;
+    if (!std::equal(fighters, fighters + 2, g_contact_players)) {
+        g_contact_stop.reset();
+        g_contact_actions.clear();
+        return;
+    }
+    for (const auto& action : g_contact_actions) {
+        const uint32_t events = load(action.opponent + 1152);
+        if (!(events & (0x00800000u | 0x20000000u)) ||
+            load(action.actor + kPlayerMove) != action.move) continue;
+        const int side = contact_side(action.id == 0x8292 ? action.actor : action.opponent);
+        if (side >= 0) g_contact_stop.set(static_cast<unsigned>(side), hitstop::decode(action.value));
+    }
+    g_contact_actions.clear();
+}
 
 float slow_motion(uint32_t player) { // sub_04E1A410
+    if (contact_frozen(player) || akuma_super_frozen(player)) return 0.0f;
     const float k = loadf(kSlowMotionScale);
     return static_cast<float>(static_cast<int32_t>(load(player + kPlayerSlow1))) * k *
            (static_cast<float>(static_cast<int32_t>(load(player + kPlayerSlow2))) * k);
@@ -3669,8 +3832,27 @@ void arc_property(uint32_t player, uint32_t id, uint32_t value) {
         s.a = a;
         s.g = g;
         s.move = move;
-        s.f0 = static_cast<int32_t>(value & 0xFF);
+        const std::string_view name = load(move) ? reinterpret_cast<const char*>(guest_pointer(load(move))) : "";
+        s.source = (value & 0x80) != 0 && (name == "Mx_hyakiC" || name == "Mx_hyakiD");
+        s.f0 = static_cast<int32_t>(value & (s.source ? 0x7F : 0xFF));
         s.n = static_cast<int32_t>(load(player + kPlayerFrame)) - s.f0;
+        if (s.source) {
+            // This marker fires at take-off, not move entry. Animation speed
+            // (Demon Flip changes it to 0xB33/0x1000) must not slow gravity.
+            for (uint32_t p = load(move + kMoveProperties), n = 0; p && n < 256; p += 12, ++n) {
+                if (load(p) == 0 && load(p + 4) == 0) break;
+                if (load(p + 4) == kArcAirMoveProp) {
+                    s.floor = std::bit_cast<float>(load(p + 8));
+                    break;
+                }
+            }
+            s.mode = Arc2D::kPhysics;
+            s.y = static_cast<float>((value >> 8) & 255) * 10.0f - s.floor;
+            s.vy = a;
+            storef(player + kPlayerY, s.y);
+            storef(player + kPlayerVy, s.vy);
+            store8(player + kPlayerHover, 0);
+        }
     } else if (id == kArcAirMoveProp) {
         if (s.move == move) return; // the property runs again
         if (s.mode == Arc2D::kBaked) {
@@ -3678,6 +3860,11 @@ void arc_property(uint32_t player, uint32_t id, uint32_t value) {
             storef(player + kPlayerY, std::max(1.0f, arc_height(s, n)));
             storef(player + kPlayerVy, s.a - s.g * static_cast<float>(n));
         } else if (s.mode == Arc2D::kPhysics) {
+            if (s.source) {
+                const float floor = std::bit_cast<float>(value);
+                s.y += s.floor - floor; // physical Y is continuous across a move change
+                s.floor = floor;
+            }
             storef(player + kPlayerY, s.y);
             storef(player + kPlayerVy, s.vy);
         } else {
@@ -3686,6 +3873,7 @@ void arc_property(uint32_t player, uint32_t id, uint32_t value) {
         store8(player + kPlayerHover, 0);
         s.mode = Arc2D::kPhysics;
         s.move = move;
+        s.followup_pause = s.source && dflip_entry_pause(move);
     } else { // kArcProp: an arc from where the player is
         if (s.mode == Arc2D::kPhysics && s.move != move) { // a new move: undo the move change's height
             storef(player + kPlayerY, s.y);
@@ -3738,6 +3926,7 @@ void trace_noctis_air_step(uint32_t player) {
 namespace {
 struct AkumaContactProbe {
     uint32_t fighters[2]{};
+    uint64_t identity[2]{};
     uint64_t tick = 0;
     akuma_projectile::Sequence ex{akuma_projectile::Kind::ex_hadoken};
     akuma_projectile::Sequence super{akuma_projectile::Kind::shinku_hadoken};
@@ -3991,7 +4180,8 @@ void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
             kind == akuma_contact::Kind::ex_hadoken && akuma_ex_runtime_enabled()) {
             const auto read = [](uint32_t address) { return load(address); };
             const auto write = [](uint32_t address, uint32_t v) { store(address, v); };
-            if (!g_akuma_probe.ex_gate.arm(slot, row, shot.speed,
+            static const uint32_t scratch = system_alloc(136);
+            if (!g_akuma_probe.ex_gate.arm(slot, row, scratch, shot.speed,
                                            shot.enemy_mask, read, write)) {
                 seq.reset();
                 akuma_ex_stage2_restore("native-gate-rejected");
@@ -4006,7 +4196,8 @@ void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
             kind == akuma_contact::Kind::shinku_hadoken && akuma_super_gate_enabled()) {
             const auto read = [](uint32_t address) { return load(address); };
             const auto write = [](uint32_t address, uint32_t v) { store(address, v); };
-            if (!g_akuma_probe.super_gate.arm(slot, row, 120u, 1u, read, write)) {
+            static const uint32_t scratch = system_alloc(136);
+            if (!g_akuma_probe.super_gate.arm(slot, row, scratch, 120u, 1u, read, write)) {
                 seq.reset(); // don't claim a timed gate that wasn't installed
                 std::fprintf(stderr, "akuma-super-gate,action=reject,reason=native-layout\n");
                 return;
@@ -4050,9 +4241,27 @@ void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
 }
 } // namespace
 
+void cafe::title::akuma_contact_reset() {
+    // Called before native situation setup can retire fighter/moveset storage.
+    akuma_super_gate_release("situation-reset");
+    akuma_ex_gate_release("situation-reset");
+    akuma_ex_stage2_restore("situation-reset");
+    g_akuma_probe = {};
+    g_contact_stop.reset();
+    g_contact_actions.clear();
+    for (auto& seen : g_contact_seen) seen.reset();
+    g_arcs.clear();
+}
+
 void cafe::title::akuma_contact_probe_begin(const uint32_t fighters[2]) {
+    ++g_source_arc_tick;
+    contact_actions_begin(fighters);
     if (!akuma_probe_enabled()) return;
+    const uint64_t identity[2] = {
+        fighters[0] ? (uint64_t(load(fighters[0] + 136u)) << 32) | load(fighters[0] + kPlayerSelectId) : 0,
+        fighters[1] ? (uint64_t(load(fighters[1] + 136u)) << 32) | load(fighters[1] + kPlayerSelectId) : 0};
     if (!fighters[0] || !fighters[1] ||
+        !std::equal(identity, identity + 2, g_akuma_probe.identity) ||
         g_akuma_probe.fighters[0] != fighters[0] ||
         g_akuma_probe.fighters[1] != fighters[1]) {
         akuma_super_gate_release("fighter-context-change");
@@ -4063,6 +4272,7 @@ void cafe::title::akuma_contact_probe_begin(const uint32_t fighters[2]) {
         g_akuma_probe.super.reset();
         g_akuma_probe.tick = 0;
     }
+    std::copy(identity, identity + 2, g_akuma_probe.identity);
     g_akuma_probe.fighters[0] = fighters[0];
     g_akuma_probe.fighters[1] = fighters[1];
     if (!fighters[0] || !fighters[1]) return;
@@ -4093,6 +4303,7 @@ void cafe::title::akuma_contact_probe_begin(const uint32_t fighters[2]) {
     }
 }
 void cafe::title::akuma_contact_probe_end(const uint32_t fighters[2]) {
+    contact_actions_end(fighters);
     if (!akuma_probe_enabled()) return;
     if (fighters[0] == g_akuma_probe.fighters[0] &&
         fighters[1] == g_akuma_probe.fighters[1]) return;
@@ -4112,12 +4323,12 @@ void cafe::title::akuma_contact_probe_end(const uint32_t fighters[2]) {
 // TTT2_TEST_AKUMA_SUPER_RUNTIME=1 is set for an experimental local test.
 PPC_FUNC(sub_04E1A3D8_orig);
 PPC_FUNC(sub_04E1A3D8) {
-    if (akuma_super_frozen(ctx.r[3])) { ctx.r[3] = 0; return; }
+    if (contact_frozen(ctx.r[3]) || akuma_super_frozen(ctx.r[3])) { ctx.r[3] = 0; return; }
     sub_04E1A3D8_orig(ctx, base);
 }
 PPC_FUNC(sub_04E1A410_orig);
 PPC_FUNC(sub_04E1A410) {
-    if (akuma_super_frozen(ctx.r[3])) {
+    if (contact_frozen(ctx.r[3]) || akuma_super_frozen(ctx.r[3])) {
         ctx.f[1].ps0 = ctx.f[1].ps1 = 0.0;
         return;
     }
@@ -4197,9 +4408,145 @@ PPC_FUNC(sub_03AE1704) { // defender r3, attacker r4, damage result r5
         store(shown + 0xb4, uint64_t{load(shown + 0xb4)} * percent / 100);
 }
 
+PPC_FUNC(sub_04E1A518_orig);
+static bool dflip_root_test_enabled() {
+    const char* value=std::getenv("TTT2_TEST_DFLIP_ROOT_HEIGHT");
+    return value && std::strcmp(value,"1")==0;
+}
+struct SourceArcRoot;
+static thread_local SourceArcRoot* g_source_arc_root=nullptr;
+struct SourceArcRoot {
+    SourceArcRoot* previous;
+    uint32_t controller=0,model=0,player=0,move=0,frame=0;
+    uint64_t tick=0;
+    float y=0;
+    bool captured=false;
+    SourceArcRoot(PPCContext& ctx,uint8_t* base,uint32_t c):previous(g_source_arc_root) {
+        g_source_arc_root=this;
+        if (!dflip_root_test_enabled() || !c) return;
+        const uint32_t m=load(c+80);
+        if (!m) return;
+        for (const auto& [p,state]:g_arcs) {
+            if (!eligible(p)) continue;
+            if (guest_call(ctx,base,sub_04E1A518_orig,{p})!=m) continue;
+            controller=c;model=m;player=p;move=load(p+kPlayerMove);break;
+        }
+    }
+    ~SourceArcRoot() { g_source_arc_root=previous; }
+    SourceArcRoot(const SourceArcRoot&)=delete;
+    SourceArcRoot& operator=(const SourceArcRoot&)=delete;
+    static bool eligible(uint32_t p) {
+        const auto it=g_arcs.find(p);
+        if (it==g_arcs.end() || !it->second.source || it->second.mode!=Arc2D::kPhysics ||
+            it->second.move!=load(p+kPlayerMove)) return false;
+        const auto name=damage_move_name(p);
+        return name=="Mx_hyakiC" || name=="Mx_hyakiD";
+    }
+    bool owns() const {
+        return player && dflip_root_test_enabled() && eligible(player) &&
+            load(player+kPlayerMove)==move && load(controller+80)==model;
+    }
+    void capture(uint32_t c) {
+        captured=false;
+        if (c!=controller || !owns()) return;
+        y=loadf(controller+68);frame=load(player+kPlayerFrameFixed);tick=g_source_arc_tick;
+        const char* sync=std::getenv("TTT2_TEST_DFLIP_TAKEOFF_SYNC");
+        // Source C/D: launch at move frame 5 in mode 3; 81C3 selects
+        // animation-relative mode 4 at move frame 6. Native 069DCAB4 samples
+        // frame_float - 1, so the launch sample can still include grounded Y.
+        // Mode 3 owns height through physics, not the sampled pose offset.
+        // These are source property frames, not a number of physics ticks.
+        constexpr uint32_t kSourceLaunchFrame=5, kSourceMode4Frame=6;
+        const uint32_t move_frame=load(player+kPlayerFrame);
+        if (sync && std::strcmp(sync,"1")==0 &&
+            move_frame>=kSourceLaunchFrame && move_frame<kSourceMode4Frame) {
+            const auto& state=g_arcs.at(player); // owns() validated this state
+            y=loadf(player+kPlayerY)+state.floor+loadf(player+72);
+        }
+        captured=std::isfinite(y);
+    }
+    void apply(uint32_t m,uint32_t root) const {
+        if (!captured || !owns() || m!=model || root!=controller+16 ||
+            tick!=g_source_arc_tick || frame!=load(player+kPlayerFrameFixed) ||
+            !std::isfinite(loadf(root+52))) return;
+        // Assign the native builder result, never add physics height a second time.
+        // Keep it published for downstream users of this same model matrix.
+        storef(root+52,y);
+    }
+};
+
+PPC_FUNC(sub_038845C8_orig);
+PPC_FUNC(sub_038845C8) {
+    if (g_source_arc_root) g_source_arc_root->apply(ctx.r[3], ctx.r[4]);
+    sub_038845C8_orig(ctx, base);
+}
+PPC_FUNC(sub_069DF470_orig);
+PPC_FUNC(sub_069DF470) {
+    SourceArcRoot source_root(ctx, base, ctx.r[3]);
+    sub_069DF470_orig(ctx, base);
+}
+PPC_FUNC(sub_069D9020_orig);
+PPC_FUNC(sub_069D9020) {
+    const uint32_t controller = ctx.r[3];
+    sub_069D9020_orig(ctx, base);
+    if (g_source_arc_root) g_source_arc_root->capture(controller);
+}
+
+bool source_arc_move_entry(uint32_t player, uint32_t pending) {
+    const auto found = g_arcs.find(player);
+    if (found == g_arcs.end()) return false;
+    Arc2D& s = found->second;
+    const uint32_t current = load(player + kPlayerMove);
+    if (!s.source || s.mode != Arc2D::kPhysics || !pending || pending == current ||
+        (s.move != current && s.move != pending)) return false;
+    uint32_t row = load(pending + kMoveProperties);
+    for (unsigned i = 0; row && i < 256; ++i, row += 12) {
+        const uint32_t at = load(row), id = load(row + 4);
+        if (!at && !id) break;
+        // The converter emits this marker only on aerial continuations.
+        if (at != 0x4001 || id != kArcAirMoveProp) continue;
+        const float floor = std::bit_cast<float>(load(row + 8));
+        if (!std::isfinite(floor)) return false;
+        if (s.move != pending) {
+            s.y += s.floor - floor;
+            s.floor = floor;
+            s.move = pending; // makes the delayed 822C callback a no-op
+            s.followup_pause = dflip_entry_pause(pending);
+        }
+        storef(player + kPlayerY, s.y);
+        storef(player + kPlayerVy, s.vy);
+        store8(player + kPlayerHover, 0);
+        return true;
+    }
+    return false; // grounded exits and unrelated moves retain native behaviour
+}
+
+PPC_FUNC(sub_05D5E01C_orig);
+PPC_FUNC(sub_05D5E01C) {
+    // Native move-entry Y writer has just run; preserve source physical Y.
+    if (ctx.lr == 0x04151668) source_arc_move_entry(ctx.r[28], load(ctx.r[20]));
+    sub_05D5E01C_orig(ctx, base);
+}
+
 PPC_FUNC(sub_03AE86A0_orig);
 PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     const uint32_t player = ctx.r[3], id = load(ctx.r[4]);
+    if ((id == 0x8292 || id == 0x8293) && added_slot(player) >= 0 &&
+        g_added[added_slot(player)].code == "mrx") {
+        if (ctx.r[5] == 0) contact_stop_action(player, ctx.r[4], id, load(ctx.r[4] + 4));
+        return;
+    }
+    // Retain native event-clock dispatch (0x8001 / 0x8008), not animation-frame tests.
+    // Consume even with the experiment off: this ID also means weapon hold elsewhere.
+    if (id == 0x822B && dflip_followup(load(player + kPlayerMove))) {
+        if (ctx.r[5] == 0) {
+            const auto it = g_arcs.find(player);
+            if (it != g_arcs.end() && it->second.source && it->second.mode == Arc2D::kPhysics &&
+                it->second.move == load(player + kPlayerMove))
+                it->second.followup_pause = load(ctx.r[4] + 4) != 0;
+        }
+        return;
+    }
     // (each property comes twice, pass 1 then 0: acted on once)
     if ((id == gauge::kAdd || id == gauge::kNoGain || id == gauge::kFlash || id == gauge::kMaxAdd ||
          id == gauge::kStop) &&
@@ -4230,6 +4577,18 @@ PPC_FUNC(sub_0404FF30_orig);
 PPC_FUNC(sub_0404FF30) {
     const uint32_t requirement = ctx.r[3], player = ctx.r[4];
     const uint32_t kind = load(requirement);
+    if (kind == akuma_contact::special_contact && player && added_slot(player) >= 0 &&
+        g_added[added_slot(player)].code == "mrx") {
+        const uint32_t victim = load(player + 0x98);
+        ctx.r[3] = contact_side(player) >= 0 && contact_side(victim) >= 0 && player != victim &&
+            akuma_contact::hit_or_block(load(victim + 1152));
+        return;
+    }
+    if ((kind == 0x8292 || kind == 0x8293) && player && added_slot(player) >= 0 &&
+        g_added[added_slot(player)].code == "mrx") {
+        contact_stop_action(player, requirement, kind, load(requirement + 4));
+        contact_actions_end(g_contact_players);
+    }
     if (bool result; (kind == gauge::kAtLeast || kind == gauge::kBelow || kind == gauge::kMaxOn) &&
                      gauge::requirement(player, added_slot(player), kind, load(requirement + 4), result)) {
         ctx.r[3] = result;
@@ -4610,6 +4969,14 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
     // An air move hangs where it is until it has thrown its projectile, as Tekken 7's air fireball does (thrown
     // right after the take-off it comes out just above the floor; falling on, one started late in the jump landed
     // well before its throw): TTT2's gravity step leaves it still (vy = its gravity, which the step takes off).
+    // T7 14071B84F sets +2B3; 14078C91F skips the airborne integrator while set.
+    // TTT2 04336D70 tests player+901 before updating Y/velocity. Use that native
+    // gate for this call only; do not freeze input, animation or unrelated physics.
+    const bool source_pause = dflip_followup_enabled() && s.source && s.followup_pause &&
+        s.mode == Arc2D::kPhysics && s.move == load(player + kPlayerMove) &&
+        dflip_followup(s.move) && loadf(player + kPlayerY) > 0.0f;
+    const uint8_t prior_hover = load8(player + kPlayerHover);
+    if (source_pause) store8(player + kPlayerHover, 1);
     const float hang_y = loadf(player + kPlayerY);
     const bool hangs = s.mode == Arc2D::kPhysics && hang_y > 0.0f && load(player + kPlayerMove) == s.move &&
                        throws_after(s.move, static_cast<int32_t>(load(player + kPlayerFrame)));
@@ -4626,6 +4993,8 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
     akuma_super_gate_hold(player);
     akuma_ex_gate_hold(player);
     sub_04336854_orig(ctx, base);
+    if (source_pause && load8(player + kPlayerHover) == 1)
+        store8(player + kPlayerHover, prior_hover);
     akuma_super_gate_hold(player);
     akuma_ex_gate_hold(player);
     if (own) correct_noctis_assault_exit(player);
@@ -4647,7 +5016,10 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
     } else { // the touchdown
         store(player + kPlayerHold, 0xFFFFFFFF);
         const int32_t ground_fall = static_cast<int32_t>(load(move + kMoveGroundFall));
-        if (ground_fall > 0 && static_cast<int32_t>(load(player + kPlayerFrame)) < ground_fall)
+        const int32_t frame = static_cast<int32_t>(load(player + kPlayerFrame));
+        if (s.source)
+            set_frame(player, air_timing::landing_frame(frame, ground_fall));
+        else if (ground_fall > 0 && frame < ground_fall)
             set_frame(player, ground_fall);
         s.mode = Arc2D::kNone;
     }

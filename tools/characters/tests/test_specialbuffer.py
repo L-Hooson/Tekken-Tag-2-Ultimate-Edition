@@ -3,6 +3,17 @@ import test_specialcancels as fixtures
 from ttt2char.convert import specialcancels as S, tagsystem as TS
 
 class BufferedSpecials(unittest.TestCase):
+ def test_source_windows_do_not_extend_early_capture_or_dispatch(self):
+  c=fixtures.SpecialCancels().converter()
+  c.defn.MOVESET.update(buffered_special_cancels=True,source_special_windows=True)
+  c.T.update(move_begin_props=[],move_end_props=[],cancel_extras=[]);c.extra_index={}
+  c.k.tables['cancels'][0].update(win_start=2,win_end=10)
+  c.k.tables['cancels'][1].update(win_start=15,win_end=17)
+  S.apply(c)
+  rows=TS.cancels(c.T,c.T['moves'][0]['cancel'])
+  self.assertEqual((rows[2]['win_start'],rows[2]['win_end']),(2,10))
+  self.assertEqual((rows[3]['win_start'],rows[3]['win_end']),(15,17))
+  self.assertEqual(TS.reqs(c.T,rows[3]['req']),[(307,3),(308,1)])
  def converter(self):
   c=fixtures.SpecialCancels().converter();c.defn.MOVESET['buffered_special_cancels']=True
   c.T.update(move_begin_props=[],move_end_props=[],cancel_extras=[]);c.extra_index={}

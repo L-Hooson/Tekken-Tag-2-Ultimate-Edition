@@ -174,6 +174,7 @@ def electric_exit(c):
 SPECIAL_VAR, SPECIAL_SET = 307, 0x8093
 # Native 308 reads player+0x628; 0x80a5 writes it (0x03af21cc).
 CONTACT_VAR, CONTACT_SET = 308, 0x80a5
+AKUMA_CONTACT = 0x7000  # runtime akuma_contact_actions.h: active opponent hit OR block
 
 
 def buffered_special(c, source, targets):
@@ -273,7 +274,8 @@ def buffered_special(c, source, targets):
                              extradata=extra(0x2800), move_id=0x8001,
                              # A few strings capture well before dispatch;
                              # allow late motions throughout the dispatch window.
-                             win_end=max(min(32767, row['win_end'] + late), capture_ends[code]),
+                             win_end=(row['win_end'] if c.defn.MOVESET.get('source_special_windows') else
+                                      max(min(32767, row['win_end'] + late), capture_ends[code])),
                              start_frame=1, option=0))
         captured.add(code)
     if not dispatch or captured != codes:
@@ -289,7 +291,8 @@ def buffered_special(c, source, targets):
     latch = [dict(direction=0, button=0,
                   req=req([(CONTACT_VAR, 0), (contact, 0), (CONTACT_SET, 1)]),
                   extradata=extra(0x2800), win_start=1, win_end=last,
-                  start_frame=1, move_id=0x8001, option=0) for contact in (46, 47)
+                  start_frame=1, move_id=0x8001, option=0)
+             for contact in ((AKUMA_CONTACT,) if c.defn.MOVESET.get('akuma_contact_latch') else (46, 47))
              if source not in c.defn.MOVESET.get('noncontact_special_cancels', ())]
     c.T['cancels'] += latch + captures + dispatch + body[:end + 1]
     # Reset at move entry, including repeated normals and the next string hit.

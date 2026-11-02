@@ -17,6 +17,11 @@ class SyntheticPack:
             self.tables['moves'].append({'cancel': cancels, 'extraprops': props})
             return idx
 
+        fields = ('default', 'left', 'right', 'back')
+        self.tables['reactions'] = [dict(zip(fields, range(2516, 2520)))]
+        self.tables['reactions'] += [{} for _ in range(4)]
+        self.tables['reactions'] += [dict(zip(fields, range(2504, 2508)))]
+        self.tables['hit_conditions'] = [{'reactions': 0}, {'reactions': 5}]
         jumps = {}
         for jump, (normal, ex) in JUMPS.items():
             jumps[jump] = add(jump)
@@ -51,7 +56,12 @@ class ValidatorTests(unittest.TestCase):
     def test_complete_fresh_import_passes(self):
         result = validate(SyntheticPack())
         self.assertTrue(result['ok'], result['failures'])
-        self.assertEqual(result['pass_count'], 8)
+        self.assertEqual(result['pass_count'], 9)
+
+    def test_shared_ex_reaction_fails(self):
+        m = SyntheticPack()
+        m.tables['hit_conditions'].append({'reactions': 5})
+        self.assertFalse(validate(m)['ok'])
 
     def test_missing_aerial_route_fails(self):
         m = SyntheticPack()

@@ -7,7 +7,7 @@ those cancels by *name and source input*, not output table indices or pack bytes
 This is gated by MOVESET['aerial_tatsu_jumps']; other fighters are untouched.
 """
 
-from . import idmaps as M
+from . import idmaps as M, gauge as G
 
 # (TTT2 jump move name, T7 source of the routes, T7 normal target, T7 EX target)
 # The basic neutral jump's route comes from the neutral recovery-jump source,
@@ -54,6 +54,28 @@ def _source_routes(k, source_name, normal_name, ex_name):
     return ex_rows + normal_rows[:4]
 
 
+def _requirements(converter, src, ex):
+    # Like restore_jump_specials, the baked jump's airborne frame window
+    # replaces T7's physical-height predicate. Never send unmapped 630 to
+    # native TTT2, or discard the EX gauge test along with it.
+    values = M.reqs(converter.k, src['req'])
+    expected = {629, 630, 0x822D}
+    if (any(pid not in expected for pid, _ in values) or
+            [(p, v) for p, v in values if p == 630] != [(630, 0)]):
+        raise ValueError('Unsupported T7 aerial Tatsu requirement list')
+    meter = [v for p, v in values if p == 629]
+    if meter != ([500] if ex else []):
+        raise ValueError('Unexpected T7 aerial Tatsu meter requirement')
+    if ex and not converter.gauge:
+        raise ValueError('EX aerial Tatsu requires the native gauge adapter')
+    rows = converter.T['requirements']
+    start = len(rows)
+    if ex:
+        rows.append(dict(condition=G.AT_LEAST, param=meter[0]))
+    rows.append(dict(condition=M.END_REQ['ttt2'], param=0))
+    return start
+
+
 def apply(converter):
     """Append source-derived Tatsu routes ahead of each original jump cancel list.
 
@@ -89,13 +111,15 @@ def apply(converter):
         routes = []
         for src in source_rows:
             src_name = converter.k.move_name(src['move_id'])
-            req, ok = converter.conv_reqs(src['req'])
-            if not ok or req is None:
-                raise ValueError('T7 aerial Tatsu requirement failed conversion: ' + source_name)
+            req = _requirements(converter, src, src_name == ex_name)
+            start = max(src['win_start'], jump['airborne_start'])
+            end = min(src['win_end'], jump['airborne_end'] - 1)
+            if start > end:
+                raise ValueError('Empty aerial Tatsu airborne window: ' + source_name)
             direction = 0x800D + converter.conv_seq(src['direction'] - 0x800D)
             routes.append(dict(direction=direction, button=src['button'], req=req,
                                extradata=converter.extradata(src['extradata']),
-                               win_start=src['win_start'], win_end=src['win_end'],
+                               win_start=start, win_end=end,
                                start_frame=src['start_frame'], move_id=output_ids[src_name], option=0))
         if len(routes) != 6:
             raise ValueError('Incorrect aerial Tatsu cancel count')

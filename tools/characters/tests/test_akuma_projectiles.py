@@ -66,5 +66,39 @@ class TestAkumaEXProjectile(unittest.TestCase):
             akuma_projectiles.ex_hadoken_hits(source, 12345)
 
 
+class TestEXReactionOwnership(unittest.TestCase):
+    def tables(self):
+        fields = ('default', 'left', 'right', 'back')
+        rows = [dict(zip(fields, range(2516, 2520)))]
+        rows += [dict(rows[0]) for _ in range(4)]
+        rows += [dict(zip(fields, range(2504, 2508)))]
+        return {'reactions': rows, 'hit_conditions': [
+            {'reactions': 5}, {'reactions': 0}, {'reactions': 5}]}
+
+    def test_private_overlay_cannot_change_other_moves(self):
+        tables = self.tables()
+        original = [dict(row) for row in tables['reactions']]
+        private = akuma_projectiles.isolate_ex_reaction(tables, 1, 2)
+        self.assertEqual(private, 11)
+        self.assertEqual(tables['hit_conditions'][0]['reactions'], 5)
+        self.assertEqual(tables['hit_conditions'][2]['reactions'], private)
+        self.assertEqual(tables['reactions'][private - 5], original[0])
+        tables['reactions'][private]['default'] = 2532
+        self.assertEqual(tables['reactions'][:6], original)
+
+    def test_unreviewed_layout_refused_without_mutation(self):
+        tables = self.tables()
+        tables['reactions'][0]['default'] = 999
+        with self.assertRaises(ValueError):
+            akuma_projectiles.isolate_ex_reaction(tables, 1, 2)
+        self.assertEqual(len(tables['reactions']), 6)
+        self.assertEqual(tables['hit_conditions'][2]['reactions'], 5)
+
+    def test_shared_or_missing_hit_conditions_refused(self):
+        for start, count in ((0, 2), (1, 1), (None, 2)):
+            with self.subTest(start=start, count=count), self.assertRaises(ValueError):
+                akuma_projectiles.isolate_ex_reaction(self.tables(), start, count)
+
+
 if __name__ == '__main__':
     unittest.main()

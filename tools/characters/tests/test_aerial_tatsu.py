@@ -20,7 +20,12 @@ class T7Source:
 
     def __init__(self):
         self.names = []
-        self.tables = {'moves': [], 'cancels': []}
+        self.tables = {'moves': [], 'cancels': [], 'requirements': []}
+        self.tables['requirements'] = [dict(condition=881, param=0) for _ in range(2357)]
+        for start, values in ((2349, [(629, 500), (630, 0), (0x822D, 0x96500000)]),
+                              (2353, [(630, 0), (0x822D, 0x96500000)])):
+            for offset, (condition, param) in enumerate(values):
+                self.tables['requirements'][start + offset] = dict(condition=condition, param=param)
         self.targets = {name: 100 + n for n, name in enumerate(sorted({
             target for _, _, normal, ex in aerial_tatsu.JUMP_ROUTES
             for target in (normal, ex)
@@ -62,11 +67,12 @@ class Converter:
         self.k = T7Source()
         self.defn = SimpleNamespace(MOVESET={'aerial_tatsu_jumps': enabled})
         self.stats = collections.Counter()
+        self.gauge = True
         names = list(dict.fromkeys(
             name for jump, _, normal, ex in aerial_tatsu.JUMP_ROUTES
             for name in (jump, normal, ex)
         ))
-        self.T = {'moves': [], 'cancels': []}
+        self.T = {'moves': [], 'cancels': [], 'requirements': []}
         for name in names:
             start = None
             if name.startswith('Mx_sJUMP'):
@@ -75,7 +81,7 @@ class Converter:
                     dict(direction=1, move_id=0),
                     dict(direction=0x8000, move_id=0),
                 ))
-            self.T['moves'].append({'name': name, 'cancel': start})
+            self.T['moves'].append({'name': name, 'cancel': start, 'airborne_start': 5, 'airborne_end': 40})
 
     def move_name(self, index):
         return self.T['moves'][index]['name']
@@ -92,6 +98,27 @@ class Converter:
 
 
 class TestAerialTatsu(unittest.TestCase):
+    def test_real_requirement_shape_keeps_meter_and_airborne_window(self):
+        from ttt2char.convert import gauge, tagsystem
+        c = Converter()
+        aerial_tatsu.apply(c)
+        rows = c.T['cancels'][c.T['moves'][0]['cancel']:][:6]
+        self.assertEqual(tagsystem.reqs(c.T, rows[0]['req']), [(gauge.AT_LEAST, 500)])
+        self.assertEqual(tagsystem.reqs(c.T, rows[2]['req']), [])
+        self.assertTrue(all((r['win_start'], r['win_end']) == (6, 37) for r in rows))
+
+    def test_unknown_requirement_fails_closed(self):
+        c = Converter()
+        c.k.tables['requirements'][2350]['condition'] = 999
+        with self.assertRaisesRegex(ValueError, 'Unsupported'):
+            aerial_tatsu.apply(c)
+
+    def test_ex_cannot_become_free(self):
+        c = Converter()
+        c.gauge = None
+        with self.assertRaisesRegex(ValueError, 'gauge'):
+            aerial_tatsu.apply(c)
+
     def test_six_states_and_36_routes(self):
         converter = Converter()
         self.assertEqual(aerial_tatsu.apply(converter), 36)

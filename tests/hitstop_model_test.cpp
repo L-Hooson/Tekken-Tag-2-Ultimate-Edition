@@ -2,6 +2,8 @@
 // c++ -std=c++20 -Wall -Wextra -Werror -I runtime/src tests/hitstop_model_test.cpp -o /tmp/hitstop_model_test
 #include "title/hitstop_model.h"
 #include "title/akuma_projectile_timing.h"
+#include "title/air_timing.h"
+#include "title/akuma_contact_actions.h"
 
 #include <cassert>
 #include <stdexcept>
@@ -11,6 +13,26 @@ using cafe::title::hitstop::Timing;
 using cafe::title::hitstop::decode;
 
 int main() {
+    using namespace cafe::title;
+    static_assert(air_timing::landing_frame(12, 20) == 21);
+    static_assert(air_timing::landing_frame(20, 20) == 21);
+    static_assert(air_timing::landing_frame(25, 20) == 25);
+    static_assert(air_timing::landing_frame(12, 0) == 12);
+    assert(akuma_contact::hit_or_block(0x00800000));
+    assert(akuma_contact::hit_or_block(0x20000000));
+    assert(!akuma_contact::hit_or_block(0));
+    akuma_contact::Actions actions;
+    actions.begin(1, 20, 10);
+    assert(actions.accept(200));
+    for (unsigned tick = 0; tick < 20; ++tick) {
+        actions.begin(1, 20, 10);
+        assert(!actions.accept(200)); // a held pose must eventually unfreeze
+    }
+    assert(actions.accept(208)); // independent attacker/defender action rows
+    actions.begin(1, 20, 1);
+    assert(actions.accept(200)); // repeated move
+    actions.begin(2, 20, 1);
+    assert(actions.accept(200)); // reused fighter address
     static_assert(decode(0x00061400u).duration == 6);
     static_assert(decode(0x01051400u).delay == 1);
     static_assert(decode(0x01051400u).duration == 5);
