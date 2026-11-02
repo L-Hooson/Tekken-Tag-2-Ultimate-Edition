@@ -90,6 +90,8 @@ GAUGE = dict(max=1000, stock=500, gain=(37, 75, 112, 225), hud='/Game/UI_Common/
 MOVESET = {
     # Reconstruct airborne normal and EX Tatsu routes from each user's own T7 moveset.
     'aerial_tatsu_jumps': True,
+    # Preserve T7 EX Hadoken's 20 -> 21 two-contact projectile chain.
+    'ex_hadoken_native_two_hits': True,
     # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds, and d/f+1+2 (Mx_3lrp)
     'bounds': dict.fromkeys(('Mx_3lprp2', 'Mx_66rk', 'Mx_6lrp', 'Mx_6lrp2', 'Mx_hyaki_gouB', 'Mx_kkt2',
                              'Mx_3lrp'), True),
