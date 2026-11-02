@@ -42,6 +42,7 @@ jobs:
           for name in \
             akuma_contact_gate_test \
             akuma_ex_reaction_test \
+            akuma_ex_pushback_test \
             akuma_projectile_timing_test \
             akuma_reversible_gate_test \
             hitstop_model_test; do
