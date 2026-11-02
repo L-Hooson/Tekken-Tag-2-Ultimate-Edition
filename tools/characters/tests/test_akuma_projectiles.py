@@ -1,7 +1,12 @@
 """Asset-free regression tests for Akuma's two-hit EX projectile conversion."""
+import os
 import struct
+import sys
 import unittest
-from tools.characters.ttt2char.convert import akuma_projectiles
+
+# CTest invokes unittest from a build folder: import through the package root.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from ttt2char.convert import akuma_projectiles
 
 
 def row(hits=1, speed=100, hc=10, nxt=None):
