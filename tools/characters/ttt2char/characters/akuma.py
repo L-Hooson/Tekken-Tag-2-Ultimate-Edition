@@ -10,7 +10,7 @@ TEKKEN7_ID = 32
 TEKKEN7_CODE = 'mrx'
 CODE = 'mrx'
 SEX = 'male'
-REVISION = 5                  # 3/4 were experimental arc/contact builds; 5: source-built aerial Tatsu
+REVISION = 6                  # 5: aerial Tatsu; 6: source-built two-stage EX Hadoken
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
 PRESETS = (
