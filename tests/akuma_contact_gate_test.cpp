@@ -5,8 +5,14 @@ using namespace cafe::title::akuma_contact;
 
 int main() {
     static_assert(classify(Snapshot{}) == Kind::none);
-    Snapshot ex{true, true, true, "Ry_EX_hadoh", 3, 0x02000000, 2, 1, 12, 90, 1};
+    Snapshot ex{true, true, true, "Ry_EX_hadoh", 3, 0x02000000, 2, 1, 12, 100, 1};
     assert(classify(ex) == Kind::ex_hadoken);
+    ex.speed = 90;
+    assert(classify(ex) == Kind::none); // rejected non-E11 native speed
+    ex.speed = 100;
+    ex.enemy_mask = 0;
+    assert(classify(ex) == Kind::none); // rejected unknown targeting mask
+    ex.enemy_mask = 1;
     ex.remaining_after_hit = 0;
     assert(classify(ex) == Kind::ex_hadoken);
     ex.remaining_after_hit = 2;
