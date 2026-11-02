@@ -7,6 +7,7 @@
 #include "title/gauge.h"
 #include "title/akuma_contact_gate.h"
 #include "title/akuma_projectile_timing.h"
+#include "title/akuma_reversible_gate.h"
 #include "outfit_menu.h"
 
 #include "cafe/ppc_ops.h"
@@ -3736,14 +3737,42 @@ struct AkumaContactProbe {
     uint64_t tick = 0;
     akuma_projectile::Sequence ex{akuma_projectile::Kind::ex_hadoken};
     akuma_projectile::Sequence super{akuma_projectile::Kind::shinku_hadoken};
+    akuma_projectile::ReversibleGate super_gate;
+    uint32_t super_owner = 0;
 } g_akuma_probe;
 
-bool akuma_probe_enabled() {
+bool akuma_super_gate_enabled() {
+    // Experimental: disabled for ordinary matches and new installs.
     static const bool enabled = [] {
-        const char* s = std::getenv("TTT2_TRACE_AKUMA_CONTACT");
+        const char* s = std::getenv("TTT2_TEST_AKUMA_SUPER_GATE");
         return s && std::strcmp(s, "1") == 0;
     }();
     return enabled;
+}
+bool akuma_probe_enabled() {
+    static const bool trace = [] {
+        const char* s = std::getenv("TTT2_TRACE_AKUMA_CONTACT");
+        return s && std::strcmp(s, "1") == 0;
+    }();
+    return trace || akuma_super_gate_enabled();
+}
+void akuma_super_gate_release(const char* reason) {
+    if (!g_akuma_probe.super_gate.active()) return;
+    const auto read = [](uint32_t address) { return load(address); };
+    const auto write = [](uint32_t address, uint32_t v) { store(address, v); };
+    const bool restored = g_akuma_probe.super_gate.release(read, write);
+    g_akuma_probe.super_owner = 0;
+    if (!restored) g_akuma_probe.super.reset(); // fail closed on changed native state
+    std::fprintf(stderr, "akuma-super-gate,action=release,reason=%s,restored=%u\n",
+                 reason, restored ? 1u : 0u);
+}
+void akuma_super_gate_hold(uint32_t player) {
+    if (!akuma_super_gate_enabled() || !player || player != g_akuma_probe.super_owner)
+        return;
+    const auto read = [](uint32_t address) { return load(address); };
+    const auto write = [](uint32_t address, uint32_t v) { store(address, v); };
+    if (!g_akuma_probe.super_gate.hold(read, write))
+        akuma_super_gate_release("projectile-slot-or-row-changed");
 }
 void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
     if (!akuma_probe_enabled() || !g_akuma_probe.tick || !attacker || !victim || !result) return;
@@ -3776,6 +3805,19 @@ void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
             ? g_akuma_probe.ex : g_akuma_probe.super;
         const auto hit = seq.accept({g_akuma_probe.tick, attacker, victim,
                                     slot, row, shot.remaining_after_hit});
+        if (hit.accepted && hit.gate_next &&
+            kind == akuma_contact::Kind::shinku_hadoken && akuma_super_gate_enabled()) {
+            const auto read = [](uint32_t address) { return load(address); };
+            const auto write = [](uint32_t address, uint32_t v) { store(address, v); };
+            if (!g_akuma_probe.super_gate.arm(slot, row, 120u, 1u, read, write)) {
+                seq.reset(); // don't claim a timed gate that wasn't installed
+                std::fprintf(stderr, "akuma-super-gate,action=reject,reason=native-layout\n");
+                return;
+            }
+            g_akuma_probe.super_owner = attacker;
+            std::fprintf(stderr, "akuma-super-gate,action=arm,tick=%llu,hit=%u,interval=7\n",
+                         static_cast<unsigned long long>(g_akuma_probe.tick), hit.hit);
+        }
         if (hit.accepted)
             std::fprintf(stderr,
                 "akuma-contact-probe,tick=%llu,move=%.*s,hit=%u,freeze=%u,"
@@ -3794,6 +3836,7 @@ void cafe::title::akuma_contact_probe_begin(const uint32_t fighters[2]) {
     if (!fighters[0] || !fighters[1] ||
         g_akuma_probe.fighters[0] != fighters[0] ||
         g_akuma_probe.fighters[1] != fighters[1]) {
+        akuma_super_gate_release("fighter-context-change");
         g_akuma_probe.ex.reset();
         g_akuma_probe.super.reset();
         g_akuma_probe.tick = 0;
@@ -3803,12 +3846,22 @@ void cafe::title::akuma_contact_probe_begin(const uint32_t fighters[2]) {
     if (!fighters[0] || !fighters[1]) return;
     ++g_akuma_probe.tick;
     g_akuma_probe.ex.release_due(g_akuma_probe.tick);
-    g_akuma_probe.super.release_due(g_akuma_probe.tick);
+    if (g_akuma_probe.super.release_due(g_akuma_probe.tick))
+        akuma_super_gate_release("seven-tick-release");
+    // If TTT2 discarded or reused a projectile before the release tick,
+    // fail closed immediately and never overwrite the replacement row.
+    if (g_akuma_probe.super_gate.active()) {
+        const uint32_t slot = g_akuma_probe.super_gate.slot();
+        if (load(slot + 60u) != g_akuma_probe.super_gate.row() ||
+            load(slot + 32u) == 0xFFFFFFFFu)
+            akuma_super_gate_release("projectile-slot-lost");
+    }
 }
 void cafe::title::akuma_contact_probe_end(const uint32_t fighters[2]) {
     if (!akuma_probe_enabled()) return;
     if (fighters[0] == g_akuma_probe.fighters[0] &&
         fighters[1] == g_akuma_probe.fighters[1]) return;
+    akuma_super_gate_release("probe-end");
     g_akuma_probe.ex.reset();
     g_akuma_probe.super.reset();
     g_akuma_probe.tick = 0;
@@ -4289,7 +4342,9 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
     if (own) trace_assist_follow(player);
     const auto it = own ? g_arcs.find(player) : g_arcs.end();
     if (it == g_arcs.end() || it->second.mode == Arc2D::kNone) {
+        akuma_super_gate_hold(player);
         sub_04336854_orig(ctx, base);
+        akuma_super_gate_hold(player);
         if (own) correct_noctis_assault_exit(player);
         return;
     }
@@ -4310,7 +4365,9 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
         if ((mode == 0 || mode == 2) && loadf(player + kPlayerY) > 0.0f && load8(player + kPlayerHover) == 0)
             storef(player + kPlayerVy, loadf(player + kPlayerVy) - (s.g - kTitleGravity) * slow_motion(player));
     }
+    akuma_super_gate_hold(player);
     sub_04336854_orig(ctx, base);
+    akuma_super_gate_hold(player);
     if (own) correct_noctis_assault_exit(player);
     const uint32_t move = load(player + kPlayerMove);
     if (hangs && move == s.move) storef(player + kPlayerY, hang_y), storef(player + kPlayerVy, 0.0f);
