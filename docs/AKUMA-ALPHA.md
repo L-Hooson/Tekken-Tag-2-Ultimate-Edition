@@ -24,6 +24,35 @@ through the project's own importer and runtime without redistributing game data.
 | Normal-to-special cancellation parity | Requires further review | Pending |
 | Tag/swap robustness and projectile VFX | Requires further review | Pending |
 
+## Phase 82F — clean EX Hadoken import and guarded stage-two adapter
+
+- `convert/akuma_projectiles.py` identifies T7 EX Hadoken's first projectile
+  from its own `0x820b` spawn property, then verifies the one-stage
+  transition and second projectile's hit configuration. The generic gauge
+  converter counted only one contact, because the source's transition
+  conditions aren't its usual projectile-hit requirement. With the
+  `ex_hadoken_native_two_hits` Akuma-only opt-in, the imported EX projectile
+  is now allocated two native contacts.
+- The source-derived decision was checked against the user's original
+  Tekken 7 Akuma data, where EX stages 20 and 21 are linked. Four synthetic
+  Python tests also passed locally; no source asset or generated pack was
+  committed.
+- The optional `TTT2_TEST_AKUMA_EX_STAGE2=1` runtime adapter now validates
+  the native standing-stagger reaction before temporarily borrowing the
+  second-hit knockdown reaction IDs and T7 pushback pointers. It requires
+  `TTT2_TEST_AKUMA_EX_RUNTIME=1` as well. It restores the row after the
+  second native knockdown or a bounded expiry, and refuses unexpected row
+  layouts or projectile gate failures.
+- Corrected four literal escaped newlines between projectile-hold calls,
+  which otherwise made `roster.cpp` invalid C++.
+- Pack importer revision is **6**. This is an internal pack invalidation
+  number, not the public `v0.1.0-alpha.1` version.
+- **Full freshly imported gameplay is still unverified:** native two-contact
+  behaviour, reaction overlay, pushback and visual effect parity require a
+  Windows runtime build and controlled Practice tests with the flags above.
+  Do not call this implementation production-ready or enable experimental
+  flags for other players yet.
+
 ## What is implemented now
 
 - `tools/characters/ttt2char/convert/aerial_tatsu.py` restores 36 source-derived
