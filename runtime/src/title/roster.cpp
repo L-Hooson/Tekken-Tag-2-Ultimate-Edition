@@ -8,6 +8,7 @@
 #include "title/akuma_contact_gate.h"
 #include "title/akuma_projectile_timing.h"
 #include "title/akuma_reversible_gate.h"
+#include "title/hitstop_model.h"
 #include "outfit_menu.h"
 
 #include "cafe/ppc_ops.h"
@@ -3738,16 +3739,31 @@ struct AkumaContactProbe {
     akuma_projectile::Sequence ex{akuma_projectile::Kind::ex_hadoken};
     akuma_projectile::Sequence super{akuma_projectile::Kind::shinku_hadoken};
     akuma_projectile::ReversibleGate super_gate;
+    hitstop::Model super_stop; // opt-in: independent of cinematic gauge stop
     uint32_t super_owner = 0;
 } g_akuma_probe;
 
-bool akuma_super_gate_enabled() {
-    // Experimental: disabled for ordinary matches and new installs.
+bool akuma_super_runtime_enabled() {
     static const bool enabled = [] {
-        const char* s = std::getenv("TTT2_TEST_AKUMA_SUPER_GATE");
+        const char* s = std::getenv("TTT2_TEST_AKUMA_SUPER_RUNTIME");
         return s && std::strcmp(s, "1") == 0;
     }();
     return enabled;
+}
+bool akuma_super_gate_enabled() {
+    // Runtime mode implies the seven-tick native gate. Both are opt-in.
+    static const bool gate_only = [] {
+        const char* s = std::getenv("TTT2_TEST_AKUMA_SUPER_GATE");
+        return s && std::strcmp(s, "1") == 0;
+    }();
+    return gate_only || akuma_super_runtime_enabled();
+}
+bool akuma_super_frozen(uint32_t player) {
+    if (!akuma_super_runtime_enabled() || !player) return false;
+    for (unsigned side = 0; side != 2; ++side)
+        if (player == g_akuma_probe.fighters[side])
+            return g_akuma_probe.super_stop.frozen(side);
+    return false;
 }
 bool akuma_probe_enabled() {
     static const bool trace = [] {
@@ -3818,6 +3834,16 @@ void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
             std::fprintf(stderr, "akuma-super-gate,action=arm,tick=%llu,hit=%u,interval=7\n",
                          static_cast<unsigned long long>(g_akuma_probe.tick), hit.hit);
         }
+        if (hit.accepted && kind == akuma_contact::Kind::shinku_hadoken &&
+            akuma_super_runtime_enabled()) {
+            const unsigned side = victim == g_akuma_probe.fighters[0] ? 0u : 1u;
+            // Phase 81D: 6/6/6/6/5 frames; one additional native reaction
+            // dispatch tick before the stop begins. Five hits remain distinct.
+            g_akuma_probe.super_stop.set(side, hitstop::Timing{1u, hit.freeze});
+            std::fprintf(stderr, "akuma-super-stop,tick=%llu,hit=%u,side=%u,frames=%u\n",
+                         static_cast<unsigned long long>(g_akuma_probe.tick),
+                         hit.hit, side, hit.freeze);
+        }
         if (hit.accepted)
             std::fprintf(stderr,
                 "akuma-contact-probe,tick=%llu,move=%.*s,hit=%u,freeze=%u,"
@@ -3839,6 +3865,7 @@ void cafe::title::akuma_contact_probe_begin(const uint32_t fighters[2]) {
         g_akuma_probe.fighters[0] != fighters[0] ||
         g_akuma_probe.fighters[1] != fighters[1]) {
         akuma_super_gate_release("fighter-context-change");
+        g_akuma_probe.super_stop.reset();
         g_akuma_probe.ex.reset();
         g_akuma_probe.super.reset();
         g_akuma_probe.tick = 0;
@@ -3847,6 +3874,11 @@ void cafe::title::akuma_contact_probe_begin(const uint32_t fighters[2]) {
     g_akuma_probe.fighters[1] = fighters[1];
     if (!fighters[0] || !fighters[1]) return;
     ++g_akuma_probe.tick;
+    if (akuma_super_runtime_enabled()) {
+        for (unsigned side = 0; side != 2; ++side)
+            g_akuma_probe.super_stop.bind(side, fighters[side]);
+        g_akuma_probe.super_stop.advance();
+    }
     g_akuma_probe.ex.release_due(g_akuma_probe.tick);
     if (g_akuma_probe.super.release_due(g_akuma_probe.tick))
         akuma_super_gate_release("seven-tick-release");
@@ -3864,10 +3896,29 @@ void cafe::title::akuma_contact_probe_end(const uint32_t fighters[2]) {
     if (fighters[0] == g_akuma_probe.fighters[0] &&
         fighters[1] == g_akuma_probe.fighters[1]) return;
     akuma_super_gate_release("probe-end");
+    g_akuma_probe.super_stop.reset();
     g_akuma_probe.ex.reset();
     g_akuma_probe.super.reset();
     g_akuma_probe.tick = 0;
     g_akuma_probe.fighters[0] = g_akuma_probe.fighters[1] = 0;
+}
+
+// The opt-in Phase 81D per-contact animation/physics stop. Input collection
+// and native cancel evaluation remain active while the two clocks are held.
+// This is separate from the game's super cinematic pause, and disabled unless
+// TTT2_TEST_AKUMA_SUPER_RUNTIME=1 is set for an experimental local test.
+PPC_FUNC(sub_04E1A3D8_orig);
+PPC_FUNC(sub_04E1A3D8) {
+    if (akuma_super_frozen(ctx.r[3])) { ctx.r[3] = 0; return; }
+    sub_04E1A3D8_orig(ctx, base);
+}
+PPC_FUNC(sub_04E1A410_orig);
+PPC_FUNC(sub_04E1A410) {
+    if (akuma_super_frozen(ctx.r[3])) {
+        ctx.f[1].ps0 = ctx.f[1].ps1 = 0.0;
+        return;
+    }
+    sub_04E1A410_orig(ctx, base);
 }
 
 // Geese has a character-specific grounded combo curve in T7's executable,
