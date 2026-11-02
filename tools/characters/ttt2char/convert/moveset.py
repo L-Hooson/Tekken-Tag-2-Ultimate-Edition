@@ -35,6 +35,7 @@ from ..movesets import REACTION_MOVE_FIELDS, TABLE_ORDER, TTT2
 from ..ttt2 import animation, motbin, motion
 from . import arcs
 from . import gauge as G
+from . import akuma_projectiles
 from . import idmaps as M
 from . import tagsystem, tagcombo, specialcancels, move_overrides, retarget, aerial_tatsu
 
@@ -1565,6 +1566,12 @@ class Converter:
             out[to:to + n] = v[fr:fr + n]
         if self.gauge and out[4]:                           # its hits on one fighter (convert/gauge.py)
             out[4] = G.projectile_hits(self.k, pi, self.game, M.cancels, M.reqs)
+            if (self.game == 't7' and
+                self.defn.MOVESET.get('ex_hadoken_native_two_hits', False)):
+                hits = akuma_projectiles.ex_hadoken_hits(self.k, pi)
+                if hits is not None:
+                    out[4] = hits
+                    self.stats['Akuma EX Hadoken two-contact projectile reconstructed'] += 1
         for f in PROJ_SOUNDS:
             if out[f] and out[f] not in self.known_sounds and not self.own_voice(out[f]):
                 out[f] = 0
