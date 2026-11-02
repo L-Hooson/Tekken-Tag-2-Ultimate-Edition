@@ -3881,6 +3881,10 @@ void akuma_ex_stage2_begin_frame() {
     }
     // Never install the stage-two data before Tekken has selected the actual
     // first standing reaction. The first hit itself stays unchanged.
+    if (tick == start + 1u && !g_akuma_probe.ex_gate.active()) {
+        akuma_ex_stage2_restore("native-gate-not-installed");
+        return;
+    }
     if (tick == start + 1u && first_stagger) {
         const uint32_t r = g_akuma_probe.ex_reaction_row;
         const auto read16 = [](uint32_t a) { return load16(a); };
@@ -3990,6 +3994,7 @@ void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
             if (!g_akuma_probe.ex_gate.arm(slot, row, shot.speed,
                                            shot.enemy_mask, read, write)) {
                 seq.reset();
+                akuma_ex_stage2_restore("native-gate-rejected");
                 std::fprintf(stderr, "akuma-ex-gate,action=reject,reason=native-layout\n");
                 return;
             }
