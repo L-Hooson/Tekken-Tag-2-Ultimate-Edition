@@ -140,6 +140,13 @@ target_compile_features(akuma_ex_reaction_test PRIVATE cxx_std_20)
 target_compile_options(akuma_ex_reaction_test PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)
 add_test(NAME akuma_ex_reaction_test COMMAND akuma_ex_reaction_test)
 
+# EX Hadoken second-hit pushback pointer overlay, synthetic native reaction rows.
+add_executable(akuma_ex_pushback_test akuma_ex_pushback_test.cpp)
+target_include_directories(akuma_ex_pushback_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(akuma_ex_pushback_test PRIVATE cxx_std_20)
+target_compile_options(akuma_ex_pushback_test PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)
+add_test(NAME akuma_ex_pushback_test COMMAND akuma_ex_pushback_test)
+
 # The keyboard's keys from keyboard.ini and its reloading (files in a
 # scratch folder of the build tree; SDL only for its key names).
 find_package(SDL3 REQUIRED CONFIG)
