@@ -3730,8 +3730,9 @@ void trace_noctis_air_step(uint32_t player) {
 }
 }
 
-// Phase 82C: read-only contact observation. Never patch native projectile
-// rows or reaction tables here; the reversible gate is a later milestone.
+// Phase 82C contact observation, read-only by default. Phase 82E adds
+// a separately opt-in, reversible Super projectile gate and defender hitstop.
+// EX reactions remain unmodified in this adapter.
 namespace {
 struct AkumaContactProbe {
     uint32_t fighters[2]{};
@@ -3778,7 +3779,10 @@ void akuma_super_gate_release(const char* reason) {
     const auto write = [](uint32_t address, uint32_t v) { store(address, v); };
     const bool restored = g_akuma_probe.super_gate.release(read, write);
     g_akuma_probe.super_owner = 0;
-    if (!restored) g_akuma_probe.super.reset(); // fail closed on changed native state
+    if (!restored) {
+        g_akuma_probe.super.reset(); // fail closed on changed native state
+        g_akuma_probe.super_stop.reset();
+    }
     std::fprintf(stderr, "akuma-super-gate,action=release,reason=%s,restored=%u\n",
                  reason, restored ? 1u : 0u);
 }
