@@ -26,7 +26,10 @@ constexpr Kind classify(const Snapshot& s) {
         (s.flags & 0x80000000u) || !s.projectile_life ||
         !s.projectile_capacity || s.remaining_after_hit >= s.projectile_capacity)
         return Kind::none;
-    if (s.owner_move == "Ry_EX_hadoh" && s.projectile_capacity == 2)
+    // Phase E11 observed native EX projectile: speed 100, enemy mask 1.
+    // Require both before permitting a live EX gate (not just a move name).
+    if (s.owner_move == "Ry_EX_hadoh" && s.projectile_capacity == 2 &&
+        s.speed == 100 && s.enemy_mask == 1)
         return Kind::ex_hadoken;
     if (s.owner_move == "Ry_shinhadouken" && s.projectile_capacity == 5 &&
         s.speed == 120 && s.enemy_mask == 1)
