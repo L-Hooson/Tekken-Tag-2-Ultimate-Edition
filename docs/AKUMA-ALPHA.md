@@ -15,11 +15,11 @@ through the project's own importer and runtime without redistributing game data.
 | Approved EX/Super impact cadence (pure model) | Yes; `akuma_projectile_timing.h` | C++ test passed locally |
 | T7 contact-stop actions | Converter support gated, disabled in Akuma definition | Python regression tests committed; not yet executed |
 | Read-only native projectile collision probe | Wired into roster/practice under `TTT2_TRACE_AKUMA_CONTACT=1` | Windows runtime verification **pending** |
-| Runtime hitstop adapter | **Not yet ported** | Pending |
+| Runtime hitstop adapter | Experimental Shinku-only opt-in | **Fresh build/game test pending** |
 | Reversible Shinku native inter-hit gate | Opt-in only; implemented and wired | **Fresh Windows build/game test pending** |
 | EX Hadoken second-hit reaction overlay | Verified reversible four-ID component; **not wired to live runtime** | Standalone C++ test passed locally |
 | EX Hadoken: complete two-hit reaction/knockdown/pushback | **Not yet ported** | Pending |
-| Super Fireball: five-hit per-impact hitstop | **Not yet ported** | Pending |
+| Super Fireball: five-hit per-impact hitstop | Experimental 6/6/6/6/5 runtime path | **Fresh build/game test pending** |
 | Source-physics Demon Flip/follow-up conversions | **Not yet ported** | Pending |
 | Normal-to-special cancellation parity | Requires further review | Pending |
 | Tag/swap robustness and projectile VFX | Requires further review | Pending |
@@ -40,12 +40,14 @@ through the project's own importer and runtime without redistributing game data.
   does not alter normal-match gameplay.
 - `runtime/src/title/hitstop_model.h` is a pure battle-tick timing model
   with explicit fighter lifecycle and bounded frame scheduling. It is
-  **not yet connected** to the runtime's contact callback. The imported
-  per-move actions must also be preserved before hitstop can function.
+  **connected only for the experimental Shinku runtime path**, using
+  post-native-dispatch contact classification. General imported contact-stop
+  actions are not connected. A fresh runtime test is still required.
 - `runtime/src/title/akuma_projectile_timing.h` preserves the approved
   EX Hadoken 8/5-frame stops at nine-tick spacing and Super Fireball
   6/6/6/6/5-frame stops at seven-tick spacing, without writing guest memory.
-  Its source-only C++ test passed locally; it is not wired to damage callbacks.
+  Its source-only C++ test passed locally. Shinku's timing values are now
+  consumed by the opt-in contact callback; EX remains model-only.
 - `convert/moveset.py` can preserve raw Tekken 7 action IDs 0x8292/0x8293
   behind `HITSTOP_CONTACT_ACTIONS`, which deliberately remains disabled
   in Akuma's character definition until the runtime adapter exists.
@@ -114,11 +116,18 @@ The existing Phase 82C read-only contact probe now also supports an
   position hold, recycled slots, unexpected memory changes and partial
   native write failure. Its standalone C++ test compiled and passed locally.
 
-**Not yet implemented:** the gameplay animation/physics hitstop adapter,
-Shinku's actual 6/6/6/6/5 frame freezes, and the EX Hadoken reaction/
-pushback integration. This opt-in gate alone is **not** Phase 81D parity.
-The full game build and in-game validation are still pending. Do not
-replace the known-good local Phase 82A installation with the branch.
+The additional `TTT2_TEST_AKUMA_SUPER_RUNTIME=1` opt-in enables the
+seven-tick native gate **and** the defender's per-contact 6/6/6/6/5-frame
+animation/physics stop through the experimentally proven title clock hooks.
+These two clocks are independent of the 71-frame Super cinematic.
+`TTT2_TEST_AKUMA_SUPER_GATE=1` alone still enables gate-only testing.
+No opt-in is enabled for ordinary matches.
+
+**Not yet implemented:** EX Hadoken's full two-hit reaction/pushback
+integration, general T7 contact action dispatch, and production-default
+hitstop behaviour. The complete Windows game build and clean-import
+in-game validation remain pending. Do not replace the working local
+Phase 82A installation with this source branch yet.
 
 ## Tested experimental reference (not committed)
 
