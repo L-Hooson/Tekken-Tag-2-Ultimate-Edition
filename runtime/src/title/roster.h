@@ -34,9 +34,11 @@ int added_slot(uint32_t player);
 // Native Akuma EX/Super contact probe (Phase 82C).
 // With TTT2_TRACE_AKUMA_CONTACT=1, this remains read-only.
 // An additional experimental TTT2_TEST_AKUMA_SUPER_GATE=1 opt-in enables
-// a reversible seven-tick native Shinku projectile gate. Neither flag is
-// enabled by default. EX Hadoken remains read-only here; actual hitstop
-// and EX reaction restoration are not yet wired into this source branch.
+// a reversible seven-tick native Shinku projectile gate. Setting
+// TTT2_TEST_AKUMA_SUPER_RUNTIME=1 enables that gate plus the separately
+// scheduled 6/6/6/6/5-frame defender hitstop clock hooks. All flags are
+// disabled by default. EX Hadoken still has no live reaction or hitstop
+// integration in this branch.
 void akuma_contact_probe_begin(const uint32_t fighters[2]);
 void akuma_contact_probe_end(const uint32_t fighters[2]);
 
