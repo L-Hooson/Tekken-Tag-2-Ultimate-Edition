@@ -1,6 +1,7 @@
 // Standalone hitstop timing test; no game assets required.
 // c++ -std=c++20 -Wall -Wextra -Werror -I runtime/src tests/hitstop_model_test.cpp -o /tmp/hitstop_model_test
 #include "title/hitstop_model.h"
+#include "title/akuma_projectile_timing.h"
 
 #include <cassert>
 #include <stdexcept>
@@ -61,4 +62,27 @@ int main() {
     invalid = false;
     try { m.frozen(4); } catch (const std::out_of_range&) { invalid = true; }
     assert(invalid);
+
+    // Phase 81D: replay each of the five Super contact-stop lengths through
+    // the actual battle-tick model. The first tick remains live, then one
+    // native reaction dispatch tick, then exactly 6/6/6/6/5 frozen ticks.
+    const auto super = cafe::title::akuma_projectile::policy(
+        cafe::title::akuma_projectile::Kind::shinku_hadoken);
+    for (unsigned hit = 0; hit != super.hits; ++hit) {
+        Model stop;
+        stop.bind(0, 11);
+        stop.bind(1, 22);
+        const unsigned freeze = super.freeze[hit];
+        stop.set(1, Timing{1, freeze});
+        assert(!stop.frozen(1));
+        stop.advance();
+        assert(!stop.frozen(1));
+        for (unsigned i = 0; i < freeze; ++i) {
+            stop.advance();
+            assert(stop.frozen(1));
+            assert(!stop.frozen(0));
+        }
+        stop.advance();
+        assert(!stop.frozen(1));
+    }
 }
