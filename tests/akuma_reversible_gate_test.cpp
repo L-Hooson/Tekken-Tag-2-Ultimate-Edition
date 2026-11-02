@@ -34,5 +34,12 @@ int main() {
     m[row+8] = 20;
     assert(!g.release(read,write));
     assert(m[row+8] == 20 && m[row+88] == 0);
+    // If the guest ignores the speed write, undo the partial mask change.
+    m[row+8] = 120; m[row+88] = 1;
+    auto failed_write = [&](uint32_t address, uint32_t v) {
+        if (address != row+8 || v != 0) m[address] = v;
+    };
+    assert(!g.arm(slot, row, 120, 1, read, failed_write));
+    assert(!g.active() && m[row+8] == 120 && m[row+88] == 1);
     return 0;
 }
