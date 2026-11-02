@@ -4469,9 +4469,11 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
     if (own) trace_assist_follow(player);
     const auto it = own ? g_arcs.find(player) : g_arcs.end();
     if (it == g_arcs.end() || it->second.mode == Arc2D::kNone) {
-        akuma_super_gate_hold(player);\n        akuma_ex_gate_hold(player);
+        akuma_super_gate_hold(player);
+        akuma_ex_gate_hold(player);
         sub_04336854_orig(ctx, base);
-        akuma_super_gate_hold(player);\n        akuma_ex_gate_hold(player);
+        akuma_super_gate_hold(player);
+        akuma_ex_gate_hold(player);
         if (own) correct_noctis_assault_exit(player);
         return;
     }
@@ -4492,9 +4494,11 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
         if ((mode == 0 || mode == 2) && loadf(player + kPlayerY) > 0.0f && load8(player + kPlayerHover) == 0)
             storef(player + kPlayerVy, loadf(player + kPlayerVy) - (s.g - kTitleGravity) * slow_motion(player));
     }
-    akuma_super_gate_hold(player);\n    akuma_ex_gate_hold(player);
+    akuma_super_gate_hold(player);
+    akuma_ex_gate_hold(player);
     sub_04336854_orig(ctx, base);
-    akuma_super_gate_hold(player);\n    akuma_ex_gate_hold(player);
+    akuma_super_gate_hold(player);
+    akuma_ex_gate_hold(player);
     if (own) correct_noctis_assault_exit(player);
     const uint32_t move = load(player + kPlayerMove);
     if (hangs && move == s.move) storef(player + kPlayerY, hang_y), storef(player + kPlayerVy, 0.0f);
