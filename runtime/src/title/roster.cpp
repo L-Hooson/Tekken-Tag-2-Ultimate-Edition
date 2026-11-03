@@ -3660,6 +3660,7 @@ bool akuma_super_frozen(uint32_t player);
 // not skip input collection or cancel evaluation, and do not use gauge::kStop.
 hitstop::Model g_contact_stop;
 uint32_t g_contact_players[2]{};
+uint32_t g_contact_start_moves[2]{};
 uint64_t g_contact_identity[2]{};
 bool g_contact_enabled = false;
 struct ContactAction {
@@ -3752,6 +3753,7 @@ void contact_actions_begin(const uint32_t fighters[2]) {
     uint64_t identity[2]{};
     for (unsigned side = 0; side != 2; ++side) {
         const uint32_t p = fighters[side];
+        g_contact_start_moves[side] = p ? load(p + kPlayerMove) : 0;
         identity[side] = p ? (uint64_t{load(p + 136)} << 32) | load(p + kPlayerSelectId) : 0;
     }
     if (!g_contact_enabled || !fighters[0] || !fighters[1] ||
@@ -3774,6 +3776,32 @@ void contact_actions_begin(const uint32_t fighters[2]) {
     }
     g_contact_stop.advance();
 }
+void latch_special_contacts(const uint32_t fighters[2]) {
+    if (!std::equal(fighters, fighters + 2, g_contact_players)) return;
+    for (unsigned side = 0; side != 2; ++side) {
+        const uint32_t player = fighters[side], victim = fighters[1 - side];
+        if (!player || !victim || load(player + 0x98) != victim) continue;
+        const int slot = added_slot(player);
+        if (slot < 0 || g_added[slot].code != "mrx") continue;
+        const uint32_t move = load(player + kPlayerMove);
+        if (!move || load(player + 0x628) != 0) continue;
+        const uint32_t cancel = load(move + 0x14);
+        const uint32_t req = cancel ? load(cancel + 8) : 0;
+        // Importer-owned marker at the head of an opted-in normal's list.
+        // Direction-zero input-only rows are not polled by native input
+        // matching. Sample the accepted frame event here, before it is cleared.
+        if (!req || load(req) != 308 || load(req + 4) != 0 ||
+            load(req + 8) != akuma_contact::special_contact ||
+            load(req + 16) != 0x80a5 || load(req + 20) != 1) continue;
+        if (!akuma_contact::latch_contact(load(victim + 1152), g_contact_start_moves[side], move,
+                load(player + kPlayerFrame), load(cancel + 16), load(cancel + 20))) continue;
+        store(player + 0x628, 1);
+        if (traces().special_cancels)
+            std::fprintf(stderr, "akuma-buffer LATCH player=%08X move=%08X frame=%u victim_events=%08X\n",
+                player, move, load(player + kPlayerFrame), load(victim + 1152));
+    }
+}
+
 void contact_actions_end(const uint32_t fighters[2]) {
     if (!g_contact_enabled) return;
     if (!std::equal(fighters, fighters + 2, g_contact_players)) {
@@ -4074,7 +4102,13 @@ void akuma_ex_stage2_begin_frame() {
         akuma_ex_stage2_restore("native-gate-not-installed");
         return;
     }
-    if (tick == start + 1u && first_stagger) {
+    if (std::getenv("TTT2_TRACE_AKUMA_CONTACT") && tick <= start + 2u)
+        std::fprintf(stderr, "akuma-ex-stage2,action=observe,tick=%llu,age=%llu,move=%.*s,frame=%u\n",
+            static_cast<unsigned long long>(tick), static_cast<unsigned long long>(tick - start),
+            int(current.size()), current.data(), load(victim + kPlayerFrame));
+    // The first native reaction may commit during start+1, after this begin
+    // hook. Arm on the first observed stagger while the inter-hit gate holds.
+    if (tick > start && tick < start + 9u && first_stagger && !g_akuma_probe.ex_reaction.active()) {
         const uint32_t r = g_akuma_probe.ex_reaction_row;
         const auto read16 = [](uint32_t a) { return load16(a); };
         const auto write16 = [](uint32_t a, uint16_t v) { store16(a, v); };
@@ -4091,7 +4125,7 @@ void akuma_ex_stage2_begin_frame() {
         std::fprintf(stderr,
             "akuma-ex-stage2,action=armed,tick=%llu,reaction=%08X,first_stagger=1\n",
             static_cast<unsigned long long>(tick), r);
-    } else if (tick >= start + 2u && !g_akuma_probe.ex_reaction.active()) {
+    } else if (tick >= start + 9u && !g_akuma_probe.ex_reaction.active()) {
         akuma_ex_stage2_restore("first-stagger-not-selected");
     }
 }
@@ -4100,16 +4134,30 @@ void akuma_ex_gate_hold(uint32_t player) {
         return;
     const auto read = [](uint32_t address) { return load(address); };
     const auto write = [](uint32_t address, uint32_t v) { store(address, v); };
-    if (!g_akuma_probe.ex_gate.hold(read, write))
+    if (!g_akuma_probe.ex_gate.hold(read, write)) {
+        if (std::getenv("TTT2_TRACE_AKUMA_CONTACT")) {
+            const uint32_t slot = g_akuma_probe.ex_gate.slot();
+            std::fprintf(stderr, "akuma-ex-gate,action=lost,tick=%llu,slot=%08X,current=%08X,pending=%08X,expected=%08X,free=%08X,remaining=%u,life=%u\n",
+                static_cast<unsigned long long>(g_akuma_probe.tick), slot, load(slot + 36), load(slot + 60),
+                g_akuma_probe.ex_gate.row(), load(slot + 32), load(slot + 40), load(slot + 44));
+        }
         akuma_ex_gate_release("projectile-slot-or-row-changed");
+    }
 }
 void akuma_super_gate_hold(uint32_t player) {
     if (!akuma_super_gate_enabled() || !player || player != g_akuma_probe.super_owner)
         return;
     const auto read = [](uint32_t address) { return load(address); };
     const auto write = [](uint32_t address, uint32_t v) { store(address, v); };
-    if (!g_akuma_probe.super_gate.hold(read, write))
+    if (!g_akuma_probe.super_gate.hold(read, write)) {
+        if (std::getenv("TTT2_TRACE_AKUMA_CONTACT")) {
+            const uint32_t slot = g_akuma_probe.super_gate.slot();
+            std::fprintf(stderr, "akuma-super-gate,action=lost,tick=%llu,slot=%08X,current=%08X,pending=%08X,expected=%08X,free=%08X,remaining=%u,life=%u\n",
+                static_cast<unsigned long long>(g_akuma_probe.tick), slot, load(slot + 36), load(slot + 60),
+                g_akuma_probe.super_gate.row(), load(slot + 32), load(slot + 40), load(slot + 44));
+        }
         akuma_super_gate_release("projectile-slot-or-row-changed");
+    }
 }
 void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
     if (!akuma_probe_enabled() || !g_akuma_probe.tick || !attacker || !victim || !result) return;
@@ -4124,8 +4172,11 @@ void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
                               move == "Ry_shinhadouken" ? 5u : 0u;
     if (!capacity) return;
     const uint32_t flags = load(result + 0x3cu);
-    if (load(result + 0x40u) != 3u ||
-        !(flags & 0x02000000u) || (flags & 0x80000000u)) return;
+    if (std::getenv("TTT2_TRACE_AKUMA_CONTACT"))
+        std::fprintf(stderr, "akuma-contact-native,tick=%llu,move=%.*s,kind=%u,flags=%08X,victim_events=%08X\n",
+            static_cast<unsigned long long>(g_akuma_probe.tick), int(move.size()), move.data(),
+            load(result + 0x40u), flags, load(victim + 1152));
+    if (!akuma_contact::native_contact(load(result + 0x40u), flags)) return;
     for (uint32_t i = 0; i < 24u; ++i) {
         const uint32_t slot = attacker + 7968u + i * 96u;
         const uint32_t row = load(slot + 60u);
@@ -4146,7 +4197,9 @@ void akuma_probe_observe(uint32_t attacker, uint32_t victim, uint32_t result) {
         // contact has been accepted and the gated projectile layout checked.
         if (hit.accepted && kind == akuma_contact::Kind::ex_hadoken &&
             akuma_ex_stage2_enabled()) {
-            if (hit.hit == 1u) {
+            if (akuma_contact::blocked(flags)) {
+                akuma_ex_stage2_restore("blocked-contact");
+            } else if (hit.hit == 1u) {
                 akuma_ex_stage2_restore("new-first-contact");
                 const uint32_t condition = load(row + 76u);
                 const uint32_t reaction = condition >= 0x30000000u &&
@@ -4303,6 +4356,7 @@ void cafe::title::akuma_contact_probe_begin(const uint32_t fighters[2]) {
     }
 }
 void cafe::title::akuma_contact_probe_end(const uint32_t fighters[2]) {
+    latch_special_contacts(fighters);
     contact_actions_end(fighters);
     if (!akuma_probe_enabled()) return;
     if (fighters[0] == g_akuma_probe.fighters[0] &&
@@ -4581,7 +4635,10 @@ PPC_FUNC(sub_0404FF30) {
         g_added[added_slot(player)].code == "mrx") {
         const uint32_t victim = load(player + 0x98);
         ctx.r[3] = contact_side(player) >= 0 && contact_side(victim) >= 0 && player != victim &&
-            akuma_contact::hit_or_block(load(victim + 1152));
+            akuma_contact::cancel_contact(load(player + 1152), load(victim + 1148));
+        if (traces().special_cancels && ctx.r[3])
+            std::fprintf(stderr, "akuma-buffer CONTACT player=%08X frame=%u attacker_events=%08X victim_damage=%u result=%u\n",
+                player, load(player + kPlayerFrame), load(player + 1152), load(victim + 1148), ctx.r[3]);
         return;
     }
     if ((kind == 0x8292 || kind == 0x8293) && player && added_slot(player) >= 0 &&

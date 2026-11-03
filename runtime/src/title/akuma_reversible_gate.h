@@ -3,6 +3,7 @@
 // The caller owns a 136-byte scratch row until release, and releases before
 // the native fighter/projectile storage is freed at a situation transition.
 #include <cstdint>
+#include <initializer_list>
 
 namespace cafe::title::akuma_projectile {
 class ReversibleGate {
@@ -15,7 +16,7 @@ public:
     bool arm(uint32_t slot, uint32_t row, uint32_t scratch,
              uint32_t expected_speed, uint32_t expected_enemy, Read read, Write write) {
         if (active_ || !slot || !row || !scratch || scratch == row ||
-            !expected_speed || !expected_enemy || read(slot + 60) != row ||
+            !expected_speed || !expected_enemy || read(slot + 36) != row || read(slot + 60) != row ||
             read(slot + 32) == 0xffffffffu || read(row + 8) != expected_speed ||
             read(row + 88) != expected_enemy) return false;
         for (unsigned i = 0; i != 34; ++i) write(scratch + 4*i, read(row + 4*i));
@@ -25,8 +26,16 @@ public:
             const uint32_t expected = i == 2 || i == 22 ? 0 : read(row + 4*i);
             if (read(scratch + 4*i) != expected) return false;
         }
+        // Native 041CE5A8 commits pending (+60) to current (+36) and resets
+        // hit/life counters. Keep BOTH pointers equal so a gate is not mistaken
+        // for a newly spawned projectile stage.
+        write(slot + 36, scratch);
         write(slot + 60, scratch);
-        if (read(slot + 60) != scratch) return false;
+        if (read(slot + 36) != scratch || read(slot + 60) != scratch) {
+            if (read(slot + 36) == scratch) write(slot + 36, row);
+            if (read(slot + 60) == scratch) write(slot + 60, row);
+            return false;
+        }
         slot_ = slot;
         original_ = row;
         scratch_ = scratch;
@@ -37,7 +46,7 @@ public:
 
     template<class Read, class Write>
     bool hold(Read read, Write write) const {
-        if (!active_ || read(slot_ + 60) != scratch_ ||
+        if (!active_ || read(slot_ + 36) != scratch_ || read(slot_ + 60) != scratch_ ||
             read(slot_ + 32) == 0xffffffffu) return false;
         for (unsigned i = 0; i != 3; ++i) write(slot_ + i*4, xyz_[i]);
         return true;
@@ -49,9 +58,11 @@ public:
         // A retired slot can still point at our copy. A reused slot belongs
         // to another shot and must not be overwritten. Neither case requires
         // writing the shared row, even if another system has changed it.
-        if (read(slot_ + 60) == scratch_) {
-            write(slot_ + 60, original_);
-            if (read(slot_ + 60) != original_) return false;
+        for (uint32_t offset : {36u, 60u}) {
+            if (read(slot_ + offset) == scratch_) {
+                write(slot_ + offset, original_);
+                if (read(slot_ + offset) != original_) return false;
+            }
         }
         slot_ = original_ = scratch_ = 0;
         active_ = false;

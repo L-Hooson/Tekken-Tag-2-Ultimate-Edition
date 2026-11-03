@@ -21,6 +21,15 @@ int main() {
     assert(akuma_contact::hit_or_block(0x00800000));
     assert(akuma_contact::hit_or_block(0x20000000));
     assert(!akuma_contact::hit_or_block(0));
+    assert(akuma_contact::cancel_contact(0x00200000u, 10)); // hit or block in cancel phase
+    assert(!akuma_contact::cancel_contact(0, 10)); // stale victim reaction / whiff
+    assert(!akuma_contact::cancel_contact(0x00200000u, 0)); // no accepted victim contact
+    assert(!akuma_contact::cancel_contact(0x00800000u, 10)); // HUD victim event is not attacker contact
+    assert(akuma_contact::latch_contact(0x00800000u, 20, 20, 15, 1, 17));
+    assert(akuma_contact::latch_contact(0x20000000u, 20, 20, 17, 1, 17));
+    assert(!akuma_contact::latch_contact(0, 20, 20, 15, 1, 17));
+    assert(!akuma_contact::latch_contact(0x00800000u, 20, 21, 15, 1, 17));
+    assert(!akuma_contact::latch_contact(0x00800000u, 20, 20, 18, 1, 17));
     akuma_contact::Actions actions;
     actions.begin(1, 20, 10);
     assert(actions.accept(200));

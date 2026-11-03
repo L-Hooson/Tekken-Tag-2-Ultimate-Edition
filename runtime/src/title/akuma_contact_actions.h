@@ -9,6 +9,20 @@ constexpr bool hit_or_block(uint32_t victim_events) {
     return (victim_events & (0x00800000u | 0x20000000u)) != 0;
 }
 
+constexpr bool latch_contact(uint32_t victim_events, uint32_t before_move,
+                             uint32_t move, uint32_t frame, uint32_t start, uint32_t end) {
+    return before_move && before_move == move && start <= frame && frame <= end &&
+           hit_or_block(victim_events);
+}
+
+// Native requirement 46 (04053E7C) first tests the attacker's +1152
+// contact bit, then the victim's +1148 damage record. The victim's event bits
+// used by the HUD are not the same phase of the cancel interpreter. Omitting
+// native 46's "not blocked" clause permits both hit and block, not whiff.
+constexpr bool cancel_contact(uint32_t attacker_events, uint32_t victim_damage) {
+    return (attacker_events & 0x00200000u) != 0 && victim_damage != 0;
+}
+
 // A frozen animation can revisit its requirement actions. Do not restart the
 // same stop indefinitely. New moves, loops and fighter generations re-arm it.
 class Actions {

@@ -15,15 +15,21 @@ It does not require the Phase 82A executable or a patched character pack.
   reviewed relative pushback source. Other moves retain their original rows.
 - Use a temporary per-shot copy for the nine-tick EX and seven-tick Super
   targeting/speed gates. Shared projectile rows are never modified. Release
-  the temporary pointer on retirement, reuse and before situation setup.
+  both native current/pending pointers on retirement, reuse and before situation
+  setup. Keeping these pointers equal prevents native stage initialization
+  from resetting the projectile's remaining contacts and lifetime.
 - Keep EX 8/5 and Super 6/6/6/6/5 contact-stop scheduling separate from the
-  cinematic pause. These runtime pilots remain opt-in.
+  cinematic pause, on both hit and block. The EX second-hit reaction overlay
+  arms only after the first native stagger has committed; blocked contacts
+  never arm it. These runtime pilots remain opt-in.
 - Import source-height Demon Flip C/D physics and airborne continuations,
   preserving source landing and cancel timing. Optional runtime follow-up
   and root-height corrections remain opt-in.
 - Keep Akuma special-command capture at its original source end frame rather
   than extending it to delayed dispatch. Use an Akuma-only hit-or-block latch;
   the generic condition used previously also accepted Tag, not block.
+  Sample accepted contact events after native battle processing for marked
+  normal moves, within their source window and only if the move did not change.
 - Preserve T7 contact-stop actions for the scoped, default-off runtime pilot.
   Reset scheduling on fighter identity changes; keep native input and cancel
   evaluation running while animation/physics clocks are stopped.

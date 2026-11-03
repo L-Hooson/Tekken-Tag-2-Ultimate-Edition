@@ -19,7 +19,12 @@ int main() {
     assert(classify(ex) == Kind::none);
     ex.remaining_after_hit = 1;
     ex.flags |= 0x80000000u;
-    assert(classify(ex) == Kind::none);
+    assert(classify(ex) == Kind::ex_hadoken);
+    assert(blocked(ex.flags));
+    ex.flags = 0x80000000u;
+    assert(classify(ex) == Kind::ex_hadoken); // block without a hit bit
+    ex.flags = 0x04000000u;
+    assert(classify(ex) == Kind::none); // chip eligibility alone is not contact
     ex.flags = 0x02000000;
     ex.akuma_owner = false;
     assert(classify(ex) == Kind::none);
@@ -34,6 +39,9 @@ int main() {
     for (uint32_t remaining = 4; remaining <= 4; --remaining) {
         shinku.remaining_after_hit = remaining;
         assert(classify(shinku) == Kind::shinku_hadoken);
+        shinku.flags = 0x80000000u;
+        assert(classify(shinku) == Kind::shinku_hadoken);
+        shinku.flags = 0x02000000u;
         if (!remaining) break;
     }
     shinku.speed = 0;

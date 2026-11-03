@@ -8,6 +8,14 @@
 namespace cafe::title::akuma_contact {
 enum class Kind : uint8_t { none, ex_hadoken, shinku_hadoken };
 
+constexpr bool blocked(uint32_t flags) { return (flags & 0x80000000u) != 0; }
+constexpr bool native_contact(uint32_t kind, uint32_t flags) {
+    // EU v16 sub_03AE15D8 maps result bit 31 to the defender's block
+    // event (1152 & 0x20000000), and bit 25 to its hit event (0x00800000).
+    // A blocked projectile consumes a contact and needs the same stop/gate.
+    return kind == 3 && (flags & (0x80000000u | 0x02000000u)) != 0;
+}
+
 struct Snapshot {
     bool akuma_owner = false;
     bool separate_fighters = false;
@@ -22,8 +30,7 @@ constexpr Kind classify(const Snapshot& s) {
     // Verified Phase 81D collision signature; never infer hits from the
     // launch animation alone. TTT2's native dispatch must already have run.
     if (!s.akuma_owner || !s.separate_fighters || !s.owner_targets_victim ||
-        s.native_kind != 3 || !(s.flags & 0x02000000u) ||
-        (s.flags & 0x80000000u) || !s.projectile_life ||
+        !native_contact(s.native_kind, s.flags) || !s.projectile_life ||
         !s.projectile_capacity || s.remaining_after_hit >= s.projectile_capacity)
         return Kind::none;
     // Phase E11 observed native EX projectile: speed 100, enemy mask 1.
