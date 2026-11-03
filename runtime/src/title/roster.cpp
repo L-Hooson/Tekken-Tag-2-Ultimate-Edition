@@ -58,6 +58,7 @@ struct Traces {
     bool eliza_assist = std::getenv("TTT2_TRACE_ELIZA_ASSIST") != nullptr;
     bool assist_follow = std::getenv("TTT2_TRACE_ASSIST_FOLLOW") != nullptr;
     bool projectiles = std::getenv("TTT2_TRACE_PROJECTILES") != nullptr;
+    bool akuma_frames = std::getenv("TTT2_TRACE_AKUMA_FRAMES") != nullptr;
 };
 const Traces& traces() {
     static const Traces read;
@@ -3654,6 +3655,7 @@ std::map<uint32_t, Arc2D> g_arcs; // by player
 uint64_t g_source_arc_tick = 0;
 
 bool akuma_super_frozen(uint32_t player);
+std::string_view damage_move_name(uint32_t player);
 
 // Original T7 contact actions are retained in revision 7 packs, but the
 // Phase 82A move whitelist remains an explicit local opt-in. These clocks do
@@ -3661,6 +3663,11 @@ bool akuma_super_frozen(uint32_t player);
 hitstop::Model g_contact_stop;
 uint32_t g_contact_players[2]{};
 uint32_t g_contact_start_moves[2]{};
+struct ContactFrameTrace {
+    uint32_t frame = 0, fixed_frame = 0;
+    float xyz[3]{};
+};
+ContactFrameTrace g_contact_frame_trace[2];
 uint64_t g_contact_identity[2]{};
 bool g_contact_enabled = false;
 struct ContactAction {
@@ -3681,7 +3688,7 @@ bool contact_test_move(std::string_view name) {
         name == "Ry_shoryuB2" ||
         name == "Ry_shoryuB3" ||
         name == "Ry_shoryuB4") return true;
-    // Neither Tekken 7 ordinary jabs nor unrelated fighters are changed.
+    // Normals use their separate contact pause; further specials require this opt-in.
     const char* specials = std::getenv("TTT2_HITSTOP_SPECIALS");
     if (!specials || std::strcmp(specials, "1") != 0) return false;
     return name == "Mx_hyaki_gouA" ||
@@ -3736,10 +3743,6 @@ void contact_stop_action(uint32_t player, uint32_t row, uint32_t id, uint32_t va
     if (!contact_test_move(name)) return;
     const uint32_t opponent = load(player + 0x98);
     if (contact_side(opponent) < 0 || opponent == player) return;
-    if (!akuma_contact::hit_or_block(load(opponent + 1152))) return;
-    auto& seen = g_contact_seen[contact_side(player)];
-    seen.begin(g_contact_identity[contact_side(player)], move, load(player + kPlayerFrame));
-    if (!seen.accept(row)) return;
     if (std::any_of(g_contact_actions.begin(), g_contact_actions.end(), [&](const ContactAction& a) {
             return a.actor == player && a.row == row && a.id == id;
         })) return; // interpreter can dispatch the same action repeatedly in one tick
@@ -3754,6 +3757,12 @@ void contact_actions_begin(const uint32_t fighters[2]) {
     for (unsigned side = 0; side != 2; ++side) {
         const uint32_t p = fighters[side];
         g_contact_start_moves[side] = p ? load(p + kPlayerMove) : 0;
+        if (traces().akuma_frames && p) {
+            auto& before = g_contact_frame_trace[side];
+            before.frame = load(p + kPlayerFrame);
+            before.fixed_frame = load(p + kPlayerFrameFixed);
+            for (unsigned axis = 0; axis != 3; ++axis) before.xyz[axis] = loadf(p + 4*axis);
+        }
         identity[side] = p ? (uint64_t{load(p + 136)} << 32) | load(p + kPlayerSelectId) : 0;
     }
     if (!g_contact_enabled || !fighters[0] || !fighters[1] ||
@@ -3796,6 +3805,17 @@ void latch_special_contacts(const uint32_t fighters[2]) {
         if (!akuma_contact::latch_contact(load(victim + 1152), g_contact_start_moves[side], move,
                 load(player + kPlayerFrame), load(cancel + 16), load(cancel + 20))) continue;
         store(player + 0x628, 1);
+        // Hold the first two contact ticks for marked cancelable normals.
+        // This also covers jabs with no source on-hit stop, and lets input
+        // capture run at the source end frame instead of expiring before a
+        // delayed source action starts. Both actors pause; whiffs never do.
+        if (g_contact_enabled && akuma_contact::cancel_normal(damage_move_name(player))) {
+            g_contact_stop.ensure(side, 2);
+            g_contact_stop.ensure(1 - side, 2);
+            if (traces().special_cancels)
+                std::fprintf(stderr, "akuma-normal-stop player=%08X frame=%u minimum=2 victim_events=%08X\n",
+                    player, load(player + kPlayerFrame), load(victim + 1152));
+        }
         if (traces().special_cancels)
             std::fprintf(stderr, "akuma-buffer LATCH player=%08X move=%08X frame=%u victim_events=%08X\n",
                 player, move, load(player + kPlayerFrame), load(victim + 1152));
@@ -3813,8 +3833,19 @@ void contact_actions_end(const uint32_t fighters[2]) {
         const uint32_t events = load(action.opponent + 1152);
         if (!(events & (0x00800000u | 0x20000000u)) ||
             load(action.actor + kPlayerMove) != action.move) continue;
+        const int actor_side = contact_side(action.actor);
+        if (actor_side < 0) continue;
+        auto& seen = g_contact_seen[actor_side];
+        seen.begin(g_contact_identity[actor_side], action.move, action.move_frame);
+        if (!seen.accept(action.row)) continue;
         const int side = contact_side(action.id == 0x8292 ? action.actor : action.opponent);
-        if (side >= 0) g_contact_stop.set(static_cast<unsigned>(side), hitstop::decode(action.value));
+        if (side >= 0) {
+            const auto timing = hitstop::decode(action.value);
+            g_contact_stop.set(static_cast<unsigned>(side), timing);
+            if (traces().special_cancels)
+                std::fprintf(stderr, "akuma-source-stop player=%08X move=%08X frame=%u side=%d delay=%u frames=%u\n",
+                    action.actor, action.move, action.move_frame, side, timing.delay, timing.duration);
+        }
     }
     g_contact_actions.clear();
 }
@@ -4356,8 +4387,32 @@ void cafe::title::akuma_contact_probe_begin(const uint32_t fighters[2]) {
     }
 }
 void cafe::title::akuma_contact_probe_end(const uint32_t fighters[2]) {
-    latch_special_contacts(fighters);
     contact_actions_end(fighters);
+    latch_special_contacts(fighters);
+    if (traces().akuma_frames && std::equal(fighters, fighters + 2, g_contact_players)) {
+        bool akuma = false;
+        for (unsigned side = 0; side != 2; ++side) {
+            const int slot = fighters[side] ? added_slot(fighters[side]) : -1;
+            akuma |= slot >= 0 && g_added[slot].code == "mrx";
+        }
+        if (akuma) for (unsigned side = 0; side != 2; ++side) {
+            const uint32_t p = fighters[side];
+            if (!p) continue;
+            const auto name = damage_move_name(p);
+            const auto& before = g_contact_frame_trace[side];
+            std::fprintf(stderr,
+                "akuma-frame,tick=%llu,contact_tick=%llu,side=%u,player=%08X,move=%.*s,same_move=%u,"
+                "before_frame=%u,frame=%u,before_fixed=%u,fixed=%u,x=%.5f,y=%.5f,z=%.5f,"
+                "dx=%.5f,dy=%.5f,dz=%.5f,vy=%.5f,contact_stop=%u,projectile_stop=%u,events=%08X\n",
+                static_cast<unsigned long long>(g_source_arc_tick),
+                static_cast<unsigned long long>(g_akuma_probe.tick), side, p,
+                int(name.size()), name.data(), g_contact_start_moves[side] == load(p + kPlayerMove) ? 1u : 0u,
+                before.frame, load(p + kPlayerFrame), before.fixed_frame, load(p + kPlayerFrameFixed),
+                loadf(p), loadf(p + 4), loadf(p + 8), loadf(p) - before.xyz[0],
+                loadf(p + 4) - before.xyz[1], loadf(p + 8) - before.xyz[2], loadf(p + kPlayerVy),
+                contact_frozen(p) ? 1u : 0u, akuma_super_frozen(p) ? 1u : 0u, load(p + 1152));
+        }
+    }
     if (!akuma_probe_enabled()) return;
     if (fighters[0] == g_akuma_probe.fighters[0] &&
         fighters[1] == g_akuma_probe.fighters[1]) return;
@@ -4395,6 +4450,56 @@ PPC_FUNC(sub_04E1A410) {
 // before sub_03AE15D8 copies it into the defender's health-damage fields.
 PPC_FUNC(sub_04E184D0);
 PPC_FUNC(sub_04E18548);
+PPC_FUNC(sub_0404FF30_orig);
+namespace {
+void source_melee_contact(PPCContext& ctx, uint8_t* base, uint32_t attacker,
+                          uint32_t victim, uint32_t result) {
+    if (!g_contact_enabled || !attacker || !victim || !result) return;
+    const int side = contact_side(attacker), other = contact_side(victim);
+    if (side < 0 || other < 0 || side == other || load(attacker + 0x98) != victim) return;
+    const int added = added_slot(attacker);
+    if (added < 0 || g_added[added].code != "mrx" || load(attacker + 0x1e88)) return;
+    const auto name = damage_move_name(attacker);
+    // Keep the user-accepted two-frame normal pause unchanged while restoring
+    // the special-move source actions. Projectile timing has its own adapter.
+    if (!contact_test_move(name) || akuma_contact::cancel_normal(name)) return;
+    const uint32_t move = load(attacker + kPlayerMove), frame = load(attacker + kPlayerFrame);
+    const uint32_t flags = load(result + 0x3c);
+    if (traces().special_cancels)
+        std::fprintf(stderr, "akuma-melee-contact move=%.*s frame=%u kind=%u flags=%08X\n",
+            int(name.size()), name.data(), frame, load(result + 0x40), flags);
+    if (load(result + 0x40) != 1) return;
+    static akuma_contact::Actions seen[2];
+    seen[side].begin(g_source_arc_tick, move, frame);
+    const auto read = [](uint32_t address) { return load(address); };
+    const auto check = [&](uint32_t row) {
+        return guest_call(ctx, base, sub_0404FF30_orig, {row, attacker, victim}) != 0;
+    };
+    for (uint32_t row = load(move + 0x14), n = 0; row && n < 1024; row += 32, ++n) {
+        if (load(row) == 0x8000) break;
+        if (load(row) || load(row + 4)) continue;
+        const auto stops = akuma_contact::read_stops(load(row + 8), flags, read, check);
+        if (!stops.valid) continue;
+        if (frame < load(row + 16) || frame > load(row + 20)) {
+            if (traces().special_cancels)
+                std::fprintf(stderr, "akuma-source-stop-window move=%.*s frame=%u start=%u end=%u\n",
+                    int(name.size()), name.data(), frame, load(row + 16), load(row + 20));
+            continue;
+        }
+        const auto apply = [&](uint32_t action, uint32_t value, unsigned target) {
+            if (!action || !seen[side].accept(action)) return;
+            const auto timing = hitstop::decode(value);
+            g_contact_stop.set(target, timing);
+            if (traces().special_cancels)
+                std::fprintf(stderr, "akuma-source-stop-native move=%.*s frame=%u side=%u delay=%u frames=%u flags=%08X\n",
+                    int(name.size()), name.data(), frame, target, timing.delay, timing.duration, flags);
+        };
+        apply(stops.actor_row, stops.actor_value, static_cast<unsigned>(side));
+        apply(stops.victim_row, stops.victim_value, static_cast<unsigned>(other));
+        break; // first eligible source row, as with the native cancel list
+    }
+}
+}
 PPC_FUNC(sub_03AE1704_orig);
 PPC_FUNC(sub_03AE1704) { // defender r3, attacker r4, damage result r5
     const uint32_t defender = ctx.r[3], attacker = ctx.r[4], result = ctx.r[5];
@@ -4430,6 +4535,7 @@ PPC_FUNC(sub_03AE1704) { // defender r3, attacker r4, damage result r5
     std::array<int32_t, 4> before;
     for (size_t i = 0; i < before.size(); ++i) before[i] = static_cast<int32_t>(load(result + 0x2c + 4 * i));
     sub_03AE1704_orig(ctx, base);
+    source_melee_contact(ctx, base, attacker, defender, result);
     akuma_probe_observe(attacker, defender, result); // read only, after native damage dispatch
     // Narrow diagnostic for the optional native Armor King wall-throw graft.
     const auto ak_attacker_move = damage_move_name(attacker);
@@ -4631,6 +4737,14 @@ PPC_FUNC(sub_0404FF30_orig);
 PPC_FUNC(sub_0404FF30) {
     const uint32_t requirement = ctx.r[3], player = ctx.r[4];
     const uint32_t kind = load(requirement);
+    if (g_contact_enabled && kind == 47 && (load(requirement + 8) == 0x8292 || load(requirement + 8) == 0x8293) &&
+        player && added_slot(player) >= 0 && g_added[added_slot(player)].code == "mrx") {
+        const uint32_t victim = load(player + 0x98);
+        ctx.r[3] = contact_side(player) >= 0 && contact_side(victim) >= 0 && player != victim &&
+            akuma_contact::cancel_contact(load(player + 1152), load(victim + 1148)) &&
+            akuma_contact::block_stop_condition(kind, load(requirement + 8), load(victim + 1152));
+        return;
+    }
     if (kind == akuma_contact::special_contact && player && added_slot(player) >= 0 &&
         g_added[added_slot(player)].code == "mrx") {
         const uint32_t victim = load(player + 0x98);
@@ -4644,7 +4758,6 @@ PPC_FUNC(sub_0404FF30) {
     if ((kind == 0x8292 || kind == 0x8293) && player && added_slot(player) >= 0 &&
         g_added[added_slot(player)].code == "mrx") {
         contact_stop_action(player, requirement, kind, load(requirement + 4));
-        contact_actions_end(g_contact_players);
     }
     if (bool result; (kind == gauge::kAtLeast || kind == gauge::kBelow || kind == gauge::kMaxOn) &&
                      gauge::requirement(player, added_slot(player), kind, load(requirement + 4), result)) {

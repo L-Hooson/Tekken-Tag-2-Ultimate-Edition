@@ -10,7 +10,8 @@ param(
     [Parameter(Mandatory=$true)][string]$Movesets,
     [string]$SaveSeed,
     [switch]$Launch,
-    [switch]$Experiments
+    [switch]$Experiments,
+    [switch]$FrameTrace
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -110,6 +111,7 @@ Copy-Item -LiteralPath (Join-Path $root 'save-backup') -Destination $save -Recur
             $env:TTT2_CHARACTERS = Join-Path $Workspace 'characters-a'
             $env:TTT2_SAVE_DIR = $save
             $env:TTT2_TRACE_AKUMA_CONTACT = '1'
+            if ($FrameTrace) { $env:TTT2_TRACE_AKUMA_FRAMES = '1' }
             if ($Experiments) {
                 foreach ($name in @('TTT2_TEST_AKUMA_EX_RUNTIME','TTT2_TEST_AKUMA_EX_STAGE2','TTT2_TEST_AKUMA_SUPER_RUNTIME','TTT2_HITSTOP_LP_HEAVY','TTT2_HITSTOP_SPECIALS','TTT2_TEST_DFLIP_FOLLOWUP_FIX','TTT2_TEST_DFLIP_ROOT_HEIGHT','TTT2_TEST_DFLIP_TAKEOFF_SYNC','TTT2_TEST_AKUMA_NEUTRAL_METER')) {
                     [Environment]::SetEnvironmentVariable($name,'1','Process')

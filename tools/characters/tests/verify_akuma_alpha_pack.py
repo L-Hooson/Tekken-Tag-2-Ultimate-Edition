@@ -84,6 +84,13 @@ def validate(m):
                 passed.append('EX stage-two reaction is private; reviewed pushback source retained')
             else:
                 failures.append('EX stage-two reaction ownership/layout is unsafe')
+    if 'Ry_shinhadouken' in names:
+        start = m.tables['moves'][names['Ry_shinhadouken']]['cancel']
+        end = next((r for r in cancels[start:start + 1024] if r['direction'] == 0x8000), None) if start is not None else None
+        if end and (end.get('win_start'), end.get('start_frame'), end.get('win_end')) == (133, 133, 32767):
+            passed.append('Super recovery returns to neutral at frame 133 (two-frame trim)')
+        else:
+            failures.append('Super recovery trim missing or unexpected neutral-return window')
     return {'passed': passed, 'failures': failures, 'pass_count': len(passed),
             'fail_count': len(failures), 'ok': not failures}
 

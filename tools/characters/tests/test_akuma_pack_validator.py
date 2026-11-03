@@ -42,7 +42,11 @@ class SyntheticPack:
             self.tables['projectiles'].append({'raw': struct.pack('>34I', *data)})
             self.tables['extra_move_properties'].extend(
                 ({'id': 0x8168, 'value': idx}, {'id': 0, 'value': 0}))
-            add(name, props=start)
+            cancel = None
+            if name == 'Ry_shinhadouken':
+                cancel = len(self.tables['cancels'])
+                self.tables['cancels'].append(dict(direction=0x8000, win_start=133, start_frame=133, win_end=32767))
+            add(name, cancels=cancel, props=start)
         # Valid source references must be >0, like actual TTT2 projectile rows.
         self.tables['projectiles'].insert(0, {'raw': bytes(136)})
         for r in self.tables['extra_move_properties']:
@@ -56,7 +60,12 @@ class ValidatorTests(unittest.TestCase):
     def test_complete_fresh_import_passes(self):
         result = validate(SyntheticPack())
         self.assertTrue(result['ok'], result['failures'])
-        self.assertEqual(result['pass_count'], 9)
+        self.assertEqual(result['pass_count'], 10)
+
+    def test_old_super_recovery_fails(self):
+        m = SyntheticPack()
+        m.tables['cancels'][-1]['win_start'] = 135
+        self.assertFalse(validate(m)['ok'])
 
     def test_shared_ex_reaction_fails(self):
         m = SyntheticPack()

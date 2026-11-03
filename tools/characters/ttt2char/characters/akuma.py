@@ -10,7 +10,7 @@ TEKKEN7_ID = 32
 TEKKEN7_CODE = 'mrx'
 CODE = 'mrx'
 SEX = 'male'
-REVISION = 7                  # source-clock Demon Flip and faithful special-cancel windows
+REVISION = 8                  # source-clock arcs/cancels; requested two-frame Super recovery trim
 HITSTOP_CONTACT_ACTIONS = True  # runtime dispatch remains default-off
 SOURCE_PHYSICS_ARCS = frozenset({'Mx_hyakiC', 'Mx_hyakiD'})
 
@@ -97,7 +97,7 @@ MOVESET = {
     # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds, and d/f+1+2 (Mx_3lrp)
     'bounds': dict.fromkeys(('Mx_3lprp2', 'Mx_66rk', 'Mx_6lrp', 'Mx_6lrp2', 'Mx_hyaki_gouB', 'Mx_kkt2',
                              'Mx_3lrp'), True),
-    'recovery_trim': {'Mx_3rplp': 4},
+    'recovery_trim': {'Mx_3rplp': 4, 'Ry_shinhadouken': 2},
     'startup_trim': {'Mx_3lrp': 4, 'Mx_66rk': 4},
     'name': '[AKUMA]',
     # Keep Akuma's own WS2 and crouching punches rather than donor equivalents.

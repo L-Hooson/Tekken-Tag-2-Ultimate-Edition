@@ -54,6 +54,15 @@ public:
             stopped_[slot][(cursor_ + 1 + timing.delay + n) % horizon] = true;
     }
 
+    // Guarantee a short immediate contact pause without deleting a longer
+    // source action or adding time after that action ends.
+    void ensure(unsigned slot, unsigned duration) {
+        check(slot);
+        if (duration >= horizon) throw std::invalid_argument("hitstop interval exceeds scheduler horizon");
+        for (unsigned n = 0; n < duration; ++n)
+            stopped_[slot][(cursor_ + 1 + n) % horizon] = true;
+    }
+
     // The adapter runs this once per battle simulation tick, for both actors.
     void advance() {
         for (auto& slot : stopped_) slot[cursor_] = false;

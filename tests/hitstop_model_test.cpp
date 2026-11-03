@@ -30,6 +30,33 @@ int main() {
     assert(!akuma_contact::latch_contact(0, 20, 20, 15, 1, 17));
     assert(!akuma_contact::latch_contact(0x00800000u, 20, 21, 15, 1, 17));
     assert(!akuma_contact::latch_contact(0x00800000u, 20, 20, 18, 1, 17));
+    assert(akuma_contact::cancel_normal("Mx_lp00"));
+    assert(akuma_contact::cancel_normal("Co_t_slk00"));
+    assert(!akuma_contact::cancel_normal("Ry_EX_hadoh"));
+    assert(!akuma_contact::cancel_normal("unrelated"));
+    assert(akuma_contact::block_stop_condition(47, 0x8292, 0x20000000));
+    assert(!akuma_contact::block_stop_condition(47, 0x8292, 0x00800000));
+    assert(!akuma_contact::block_stop_condition(47, 308, 0x20000000));
+    assert(!akuma_contact::block_stop_condition(46, 0x8292, 0x20000000));
+    // Real-contact extraction preserves source stop values, evaluates every
+    // additional predicate, and never dispatches unrelated requirement actions.
+    std::array<uint32_t, 16> reqs{46, 0, 0x8001, 0, 457, 0,
+        0x8292, 0x000A0000, 0x8293, 0x020A1400, 0x801d, 9, 690, 0};
+    auto read_req = [&](uint32_t a) { return reqs.at((a - 100) / 4); };
+    unsigned checked = 0;
+    auto check_req = [&](uint32_t a) { ++checked; return read_req(a) == 457; };
+    auto stops = akuma_contact::read_stops(100, 0x02000000, read_req, check_req);
+    assert(stops.valid && stops.actor_value == 0x000A0000 && stops.victim_value == 0x020A1400);
+    assert(checked == 1);
+    assert(!akuma_contact::read_stops(100, 0x84000000, read_req, check_req).valid);
+    assert(!akuma_contact::read_stops(100, 0, read_req, check_req).valid);
+    assert(!akuma_contact::read_stops(100, 0x02000000, read_req,
+                                    [](uint32_t) { return false; }).valid);
+    reqs[0] = 47;
+    assert(akuma_contact::read_stops(100, 0x84000000, read_req, check_req).valid);
+    assert(!akuma_contact::read_stops(100, 0x02000000, read_req, check_req).valid);
+    reqs[1] = 1;
+    assert(!akuma_contact::read_stops(100, 0x84000000, read_req, check_req).valid);
     akuma_contact::Actions actions;
     actions.begin(1, 20, 10);
     assert(actions.accept(200));
@@ -61,6 +88,21 @@ int main() {
     m.set(1, Timing{1, 3});
     m.advance();
     assert(!m.frozen(1));
+
+    // Normal-contact assistance fills the initial source delay, preserving
+    // its longer stop. It overlaps rather than appending two more frames.
+    Model normal;
+    normal.set(0, Timing{1, 5});
+    normal.ensure(0, 2);
+    normal.ensure(1, 2);
+    assert(!normal.frozen(0) && !normal.frozen(1));
+    for (unsigned tick = 0; tick < 6; ++tick) {
+        normal.advance();
+        assert(normal.frozen(0));
+        assert(normal.frozen(1) == (tick < 2));
+    }
+    normal.advance();
+    assert(!normal.frozen(0) && !normal.frozen(1));
     for (unsigned i = 0; i < 3; ++i) {
         m.advance();
         assert(m.frozen(1));

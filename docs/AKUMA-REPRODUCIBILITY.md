@@ -39,6 +39,13 @@ and optionally launches the fresh runtime. It never installs over a game.
 `feedback-reports.zip` contains only logs, hashes and status reports.
 A successful launch is explicitly **not** a gameplay pass.
 
+Add `-FrameTrace` for a controlled timing/trajectory trial. The default-off
+trace records each fighter's before/after animation frame, position change,
+vertical velocity and active contact-stop state once per battle tick while
+Akuma is present. It distinguishes requested stop durations from observed
+animation/physics behavior and records move changes during cancel input.
+Keep these detailed local logs with the trial's distance and opponent state.
+
 ## Individual import and static verification
 
 ```powershell

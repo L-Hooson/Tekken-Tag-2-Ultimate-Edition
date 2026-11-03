@@ -1,7 +1,7 @@
 # Akuma v0.1.0-alpha.1
 
 **Release assessment: source-build-only. Gameplay parity is not certified.**
-The internal importer revision is **7**; it is not the public version.
+The internal importer revision is **8**; it is not the public version.
 This branch reconstructs a candidate from the owner's original game files.
 It does not require the Phase 82A executable or a patched character pack.
 
@@ -33,19 +33,36 @@ It does not require the Phase 82A executable or a patched character pack.
 - Preserve T7 contact-stop actions for the scoped, default-off runtime pilot.
   Reset scheduling on fighter identity changes; keep native input and cancel
   evaluation running while animation/physics clocks are stopped.
+  Non-projectile specials select their retained stop actions at a confirmed
+  native melee contact, checking source windows and additional predicates.
+  Only stop timings are dispatched; unrelated requirement actions are not
+  replayed. This survives native move-stage transitions and repeated contacts.
+  Cancelable normals separately receive a two-frame contact pause for both
+  fighters to keep late contact-confirm inputs within the original move window.
+  This is an opt-in adjustment following the user's execution-feel trial;
+  it does not extend source cancel-window endpoints or pause whiffs.
 - Preserve the existing opt-in, Practice-only neutral gauge refill.
+- Apply the user's two-frame Super Fireball recovery adjustment in the importer:
+  neutral return moves from frame 135 to 133. Its projectile contacts, cinematic
+  pause and 6/6/6/6/5 contact stops retain their prior timing.
 
 ## Evidence from the Windows source build
 
-On 2026-11-02 the fresh checkout regenerated 79,564 reachable functions in
+On 2026-11-02 a fresh checkout regenerated 79,564 reachable functions in
 257 shards from the owner's RPX and built the native Windows runtime.
-The current Windows CTest run passed **19/19** tests, including native game
-input checks. The full importer suite passed **713 tests (28 skipped)**.
-The fresh revision-7 pack passed all nine structural checks, including private
-EX reaction ownership. The source-built runtime launched with Vulkan and
-the user confirmed its window visible and responding. Automated Windows
-capture timed out, so no controlled Practice observation was completed.
-These are build/import observations, not evidence of combat parity.
+The subsequent Windows CTest run passed **19/19** tests, including native game
+input checks. The revision-8 importer suite passed **715 tests (28 skipped)**.
+The fresh revision-8 pack passed all ten structural checks, including private
+EX reaction ownership and the two-frame Super recovery adjustment.
+
+In owner-operated Practice trials on 2026-11-03, the user confirmed normal
+cancels on hit/block, their two-frame contact pause, heavy Tatsu/Shoryuken
+hitstop, EX first stagger/second knockdown and hit/block projectile stops.
+The user also accepted Super's shorter recovery and five impacts at close and
+medium range on hit/block, all normal/EX aerial Tatsu jump directions, Demon
+Flip follow-ups/landings, tagging and Tag Assault. Native frame traces record
+the five Super pause lengths and frozen animation counters. These manual
+acceptances do not prove exact damage/trajectory or whole-roster parity.
 
 The source-only CI workflow runs synthetic converter and C++ tests on Linux.
 Check the workflow results for the exact candidate commit; an older green run
@@ -58,6 +75,7 @@ All switches below are off unless explicitly set to `1` in the game process.
 | Switch | Effect |
 | --- | --- |
 | `TTT2_TRACE_AKUMA_CONTACT` | Read-only native contact logging |
+| `TTT2_TRACE_AKUMA_FRAMES` | Read-only animation/position samples around fighter updates |
 | `TTT2_TEST_AKUMA_EX_RUNTIME` | EX nine-tick gate and 8/5-frame defender stops |
 | `TTT2_TEST_AKUMA_EX_STAGE2` | EX second knockdown/pushback; requires EX runtime |
 | `TTT2_TEST_AKUMA_SUPER_RUNTIME` | Super seven-tick gate and 6/6/6/6/5 stops |
@@ -71,19 +89,20 @@ All switches below are off unless explicitly set to `1` in the game process.
 
 ## Outstanding release criteria
 
-Controlled Practice measurements must compare this fresh import against
-Phase 82A: all six normal/EX jump routes, landing/trajectories/damage, both
-EX contacts and pushback, five Super impacts, Demon Flip continuations,
-normal-to-special cancels on hit/block/whiff, meter off/on, repeated shots,
-other projectile interactions, tagging, Tag Assault and unrelated fighters.
+Complete a clean build and CI for the final committed revision. Remaining
+measured comparisons include damage/trajectory/pushback against Phase 82A,
+meter off/on and ordinary-match isolation, whiff cancels, other projectile
+interactions and unrelated fighters. Earlier trials recorded two longer first
+Super intervals (8 and 13 ticks); controlled traces must resolve those against
+the seven-tick reference. Animation counters stop, but small position changes
+can occur between fighter updates; the frame trace must not be treated as proof
+of whole-battle physics parity.
 
-The native contact observer scans live projectile slots after damage dispatch.
-If the final contact retires its slot before observation, the final stop can
-be missed. This requires a native trace and a verified collision-lifetime
-adapter before release. Do not infer final impacts from launch animations.
+Projectile observation now retains native row identity and hit/life counters
+through private current/pending scratch rows. Final contacts have been observed
+in live trials. Do not infer final impacts from launch animations alone.
 Reaction IDs and the five-row pushback relationship are validated assumptions
 of the reviewed source layout; incompatible source data fails closed.
-The general contact-action ledger also needs live multi-hit validation.
 
 See [AKUMA-REPRODUCIBILITY.md](AKUMA-REPRODUCIBILITY.md) for the isolated
 validation procedure. Keep the working Phase 82A installation untouched.
